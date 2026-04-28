@@ -1,6 +1,5 @@
 package com.ccr.config;
 
-import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,7 +10,6 @@ import java.util.Map;
  * CCR 项目的核心配置类。
  * 通过 spring-boot-starter-configuration-processor 自动映射 application.properties 中以 "ccr" 为前缀的配置项。
  */
-@Data
 @Configuration
 @ConfigurationProperties(prefix = "ccr")
 public class CcrConfig {
@@ -24,6 +22,22 @@ public class CcrConfig {
      * 路由映射表，对应配置中的 ccr.router
      */
     private Map<String, String> router;
+
+    public List<Provider> getProviders() {
+        return providers;
+    }
+
+    public void setProviders(List<Provider> providers) {
+        this.providers = providers;
+    }
+
+    public Map<String, String> getRouter() {
+        return router;
+    }
+
+    public void setRouter(Map<String, String> router) {
+        this.router = router;
+    }
 
     /**
      * 获取长上下文判定的 Token 阈值。
@@ -50,7 +64,6 @@ public class CcrConfig {
     /**
      * 供应商配置类。
      */
-    @Data
     public static class Provider {
         /**
          * 供应商名称
@@ -72,6 +85,18 @@ public class CcrConfig {
          */
         private TransformerConfig transformer;
 
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+
+        public String getApiKey() { return apiKey; }
+        public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+
+        public TransformerConfig getTransformer() { return transformer; }
+        public void setTransformer(TransformerConfig transformer) { this.transformer = transformer; }
+
         /**
          * 判断当前供应商是否使用 Anthropic 协议。
          *
@@ -85,11 +110,13 @@ public class CcrConfig {
     /**
      * 转换器详细配置。
      */
-    @Data
     public static class TransformerConfig {
         /**
          * 使用的转换器列表（如 ["Anthropic"]）
          */
         private List<String> use;
+
+        public List<String> getUse() { return use; }
+        public void setUse(List<String> use) { this.use = use; }
     }
 }

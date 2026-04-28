@@ -1,46 +1,13 @@
 package com.ccr.service;
 
-import com.ccr.config.CcrConfig;
-import com.ccr.constant.CcrConstants;
-import com.ccr.service.RouterService.RouteResult;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.http.server.reactive.ServerHttpResponse;
-import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
-import java.nio.charset.StandardCharsets;
-
 /**
- * 代理转发服务，处理请求转发、协议转换及响应透传
+ * 代理转发服务接口，处理请求转发、协议转换及响应透传
  */
-@Slf4j
-@Service
-public class ProxyService {
-
-    private final WebClient webClient;
-    private final RouterService routerService;
-    private final TransformerService transformerService;
-    private final ObjectMapper objectMapper;
-
-    public ProxyService(WebClient.Builder webClientBuilder, 
-                        RouterService routerService, 
-                        TransformerService transformerService, 
-                        ObjectMapper objectMapper) {
-        this.webClient = webClientBuilder.build();
-        this.routerService = routerService;
-        this.transformerService = transformerService;
-        this.objectMapper = objectMapper;
-    }
-
+public interface ProxyService {
     /**
      * 执行代理请求的核心入口
      * 
@@ -49,128 +16,5 @@ public class ProxyService {
      * @param response ServerHttpResponse 对象
      * @return 响应数据流
      */
-    public Flux<DataBuffer> proxyRequest(String body, boolean isIncomingOpenAi, ServerHttpResponse response) {
-        // 1. 获取路由信息：决定使用哪个供应商及目标模型
-        RouteResult route = routerService.getRoute(body);
-        CcrConfig.Provider provider = route.getProvider();
-        String targetModel = route.getTargetModel();
-        boolean isOutgoingAnthropic = provider.isAnthropic();
-
-        log.info("Forwarding request to provider: [{}] model: [{}] URL: {} (Anthropic: {})", 
-                provider.getName(), targetModel, provider.getUrl(), isOutgoingAnthropic);
-
-        // 2. 转换请求体：根据入参协议和目标供应商协议进行转换，并更新模型名称
-        String finalBody = transformRequest(body, isIncomingOpenAi, isOutgoingAnthropic, targetModel);
-
-        // 3. 发送请求并处理响应透传
-        return forwardToUpstream(finalBody, provider, isIncomingOpenAi, isOutgoingAnthropic, response);
-    }
-
-    /**
-     * 根据协议差异转换请求内容
-     */
-    private String transformRequest(String body, boolean isIncomingOpenAi, boolean isOutgoingAnthropic, String targetModel) {
-        String finalBody = body;
-        // 如果输入是 OpenAI 格式但输出是 Anthropic 格式，进行转换
-        if (isIncomingOpenAi && isOutgoingAnthropic) {
-            finalBody = transformerService.transformOpenAiToAnthropic(body);
-        } 
-        // 如果输入是 Anthropic 格式但输出是 OpenAI 格式，进行转换
-        else if (!isIncomingOpenAi && !isOutgoingAnthropic) {
-            finalBody = transformerService.transformAnthropicToOpenAi(body);
-        }
-
-        // 统一更新请求体中的模型名称为路由选定的目标模型
-        try {
-            JsonNode root = objectMapper.readTree(finalBody);
-            if (root instanceof ObjectNode) {
-                ((ObjectNode) root).put(CcrConstants.FIELD_MODEL, targetModel);
-                finalBody = root.toString();
-            }
-        } catch (Exception e) {
-            log.error("Failed to update model name: {}", e.getMessage());
-        }
-        return finalBody;
-    }
-
-    /**
-     * 将请求转发至上游供应商，并处理 Headers 复制和响应转换
-     */
-    private Flux<DataBuffer> forwardToUpstream(String requestBody, CcrConfig.Provider provider, 
-                                             boolean isIncomingOpenAi, boolean isOutgoingAnthropic, 
-                                             ServerHttpResponse response) {
-        return webClient.post()
-                .uri(provider.getUrl())
-                // 根据供应商协议设置认证 Header
-                .header(isOutgoingAnthropic ? CcrConstants.HEADER_X_API_KEY : CcrConstants.HEADER_AUTHORIZATION, 
-                        isOutgoingAnthropic ? provider.getApiKey() : CcrConstants.HEADER_BEARER_PREFIX + provider.getApiKey())
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .bodyValue(requestBody)
-                .exchangeToFlux(res -> {
-                    log.debug("Upstream [{}] returned status code: {}", provider.getName(), res.statusCode());
-                    response.setStatusCode(res.statusCode());
-                    
-                    MediaType contentType = res.headers().asHttpHeaders().getContentType();
-                    boolean isStreaming = contentType != null && contentType.toString().contains(CcrConstants.MEDIA_TYPE_EVENT_STREAM);
-
-                    // 复制上游 Headers 到响应，但排除会导致冲突的传输相关 Header
-                    res.headers().asHttpHeaders().forEach((name, values) -> {
-                        if (!name.equalsIgnoreCase(HttpHeaders.TRANSFER_ENCODING) && 
-                            !name.equalsIgnoreCase(HttpHeaders.CONTENT_LENGTH) &&
-                            !name.equalsIgnoreCase(HttpHeaders.CONTENT_TYPE)) {
-                            response.getHeaders().addAll(name, values);
-                        }
-                    });
-                    
-                    // 判断是否需要进行响应格式转换（SSE 或普通 JSON）
-                    if (isIncomingOpenAi && isOutgoingAnthropic) {
-                        // 输入是 OpenAI，输出是 Anthropic -> 需要将 Anthropic 响应转回 OpenAI 格式
-                        return handleResponseTransformation(res, response, isStreaming, true);
-                    } else if (!isIncomingOpenAi && !isOutgoingAnthropic) {
-                        // 输入是 Anthropic，输出是 OpenAI -> 需要将 OpenAI 响应转回 Anthropic 格式
-                        return handleResponseTransformation(res, response, isStreaming, false);
-                    } else {
-                        // 协议一致（均为 OpenAI 或均为 Anthropic），直接透传原始数据流
-                        response.getHeaders().setContentType(contentType);
-                        return res.bodyToFlux(DataBuffer.class);
-                    }
-                });
-    }
-
-    /**
-     * 处理响应的协议转换（支持流式和非流式）
-     */
-    private Flux<DataBuffer> handleResponseTransformation(org.springframework.web.reactive.function.client.ClientResponse res, 
-                                                         ServerHttpResponse response, 
-                                                         boolean isStreaming, 
-                                                         boolean isAnthropicToOpenAi) {
-        // 设置响应的 Content-Type
-        response.getHeaders().setContentType(isStreaming ? MediaType.TEXT_EVENT_STREAM : MediaType.APPLICATION_JSON);
-        
-        if (isStreaming) {
-            // 流式响应转换：逐个处理 SSE 事件
-            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
-                    .flatMap(sse -> {
-                        String data = sse.data();
-                        if (data == null) return Flux.empty();
-                        
-                        String input = CcrConstants.SSE_DATA_PREFIX + data + CcrConstants.SSE_LINE_SEPARATOR;
-                        String transformed = isAnthropicToOpenAi ? 
-                                transformerService.transformAnthropicSseToOpenAi(input) :
-                                transformerService.transformOpenAiSseToAnthropic(input);
-                                
-                        return transformed != null ? 
-                                Flux.just(response.bufferFactory().wrap(transformed.getBytes(StandardCharsets.UTF_8))) : 
-                                Flux.empty();
-                    });
-        } else {
-            // 普通 JSON 响应转换
-            return res.bodyToMono(String.class)
-                    .map(b -> isAnthropicToOpenAi ? 
-                            transformerService.transformAnthropicResponseToOpenAi(b) :
-                            transformerService.transformOpenAiResponseToAnthropic(b))
-                    .map(b -> response.bufferFactory().wrap(b.getBytes(StandardCharsets.UTF_8)))
-                    .flux();
-        }
-    }
+    Flux<DataBuffer> proxyRequest(String body, boolean isIncomingOpenAi, ServerHttpResponse response);
 }

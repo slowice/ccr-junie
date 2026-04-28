@@ -47,7 +47,7 @@ mvn test
 1. **模块完整性**：核心代理和路由逻辑已稳定。对任何模块的修改都必须与对应 TypeScript 版本的逻辑保持同步。
 2. **响应式规范**：本项目使用 Spring WebFlux。确保所有新特性保持非阻塞特性。
 3. **多供应商支持**：添加新供应商时，需同时更新 `application.properties` 中的 `ccr.providers` 和 `ccr.router` 映射。
-4. **代码规范**：代码要尽可能规范。使用 Logger 代替 `System.out`。避免硬编码字符串，使用对象或常量代替以增加可复用性。
+4. **代码规范**：代码要尽可能规范。使用 Logger 代替 `System.out`。避免硬编码字符串，使用对象或常量代替以增加可复用性。Service 层应遵循 `Interface + Impl` 模式。
 
 ## 验证清单
 在提交对此模块的任何更改前：

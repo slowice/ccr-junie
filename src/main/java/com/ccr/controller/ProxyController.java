@@ -1,7 +1,8 @@
 package com.ccr.controller;
 
 import com.ccr.service.ProxyService;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,9 +14,9 @@ import reactor.core.publisher.Flux;
  * 代理控制器，负责接收客户端请求并转发
  * 支持 Anthropic (/v1/messages) 和 OpenAI (/v1/chat/completions) 两种协议入口
  */
-@Slf4j
 @RestController
 public class ProxyController {
+    private static final Logger log = LoggerFactory.getLogger(ProxyController.class);
 
     private final ProxyService proxyService;
 
