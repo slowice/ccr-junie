@@ -1,7 +1,6 @@
 package com.ccr.service;
 
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.publisher.Flux;
 
 /**
@@ -13,8 +12,7 @@ public interface ProxyService {
      * 
      * @param body 请求体字符串
      * @param isIncomingOpenAi 客户端请求是否为 OpenAI 格式 (true: OpenAI, false: Anthropic)
-     * @param response ServerHttpResponse 对象
-     * @return 响应数据流
+     * @return 响应数据流 (ServerSentEvent 格式)
      */
-    Flux<DataBuffer> proxyRequest(String body, boolean isIncomingOpenAi, ServerHttpResponse response);
+    Flux<ServerSentEvent<String>> proxyRequest(String body, boolean isIncomingOpenAi);
 }

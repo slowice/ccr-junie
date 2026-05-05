@@ -50,11 +50,10 @@ public class ProxyServiceImpl implements ProxyService {
      * 
      * @param body 请求体字符串
      * @param isIncomingOpenAi 客户端请求是否为 OpenAI 格式 (true: OpenAI, false: Anthropic)
-     * @param response ServerHttpResponse 对象
      * @return 响应数据流
      */
     @Override
-    public Flux<DataBuffer> proxyRequest(String body, boolean isIncomingOpenAi, ServerHttpResponse response) {
+    public Flux<ServerSentEvent<String>> proxyRequest(String body, boolean isIncomingOpenAi) {
         // 1. 获取路由信息：决定使用哪个供应商及目标模型
         RouteResult route = routerService.getRoute(body);
         CcrConfig.Provider provider = route.getProvider();
@@ -68,7 +67,7 @@ public class ProxyServiceImpl implements ProxyService {
         String finalBody = transformRequest(body, isIncomingOpenAi, isOutgoingAnthropic, targetModel);
 
         // 3. 发送请求并处理响应透传
-        return forwardToUpstream(finalBody, provider, isIncomingOpenAi, isOutgoingAnthropic, response);
+        return forwardToUpstream(finalBody, provider, isIncomingOpenAi, isOutgoingAnthropic);
     }
 
     /**
@@ -101,9 +100,8 @@ public class ProxyServiceImpl implements ProxyService {
     /**
      * 将请求转发至上游供应商，并处理 Headers 复制和响应转换
      */
-    private Flux<DataBuffer> forwardToUpstream(String requestBody, CcrConfig.Provider provider, 
-                                             boolean isIncomingOpenAi, boolean isOutgoingAnthropic, 
-                                             ServerHttpResponse response) {
+    private Flux<ServerSentEvent<String>> forwardToUpstream(String requestBody, CcrConfig.Provider provider, 
+                                             boolean isIncomingOpenAi, boolean isOutgoingAnthropic) {
         return webClient.post()
                 .uri(provider.getUrl())
                 // 根据供应商协议设置认证 Header
@@ -113,31 +111,26 @@ public class ProxyServiceImpl implements ProxyService {
                 .bodyValue(requestBody)
                 .exchangeToFlux(res -> {
                     log.debug("Upstream [{}] returned status code: {}", provider.getName(), res.statusCode());
-                    response.setStatusCode(res.statusCode());
                     
                     MediaType contentType = res.headers().asHttpHeaders().getContentType();
                     boolean isStreaming = contentType != null && contentType.toString().contains(CcrConstants.MEDIA_TYPE_EVENT_STREAM);
 
-                    // 复制上游 Headers 到响应，但排除会导致冲突的传输相关 Header
-                    res.headers().asHttpHeaders().forEach((name, values) -> {
-                        if (!name.equalsIgnoreCase(HttpHeaders.TRANSFER_ENCODING) && 
-                            !name.equalsIgnoreCase(HttpHeaders.CONTENT_LENGTH) &&
-                            !name.equalsIgnoreCase(HttpHeaders.CONTENT_TYPE)) {
-                            response.getHeaders().addAll(name, values);
-                        }
-                    });
-                    
                     // 判断是否需要进行响应格式转换（SSE 或普通 JSON）
                     if (isIncomingOpenAi && isOutgoingAnthropic) {
                         // 输入是 OpenAI，输出是 Anthropic -> 需要将 Anthropic 响应转回 OpenAI 格式
-                        return handleResponseTransformation(res, response, isStreaming, true);
+                        return handleResponseTransformation(res, isStreaming, true);
                     } else if (!isIncomingOpenAi && !isOutgoingAnthropic) {
                         // 输入是 Anthropic，输出是 OpenAI -> 需要将 OpenAI 响应转回 Anthropic 格式
-                        return handleResponseTransformation(res, response, isStreaming, false);
+                        return handleResponseTransformation(res, isStreaming, false);
                     } else {
                         // 协议一致（均为 OpenAI 或均为 Anthropic），直接透传原始数据流
-                        response.getHeaders().setContentType(contentType);
-                        return res.bodyToFlux(DataBuffer.class);
+                        if (isStreaming) {
+                            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {});
+                        } else {
+                            return res.bodyToMono(String.class)
+                                    .map(data -> ServerSentEvent.<String>builder().data(data).build())
+                                    .flux();
+                        }
                     }
                 });
     }
@@ -145,13 +138,9 @@ public class ProxyServiceImpl implements ProxyService {
     /**
      * 处理响应的协议转换（支持流式和非流式）
      */
-    private Flux<DataBuffer> handleResponseTransformation(org.springframework.web.reactive.function.client.ClientResponse res, 
-                                                         ServerHttpResponse response, 
+    private Flux<ServerSentEvent<String>> handleResponseTransformation(org.springframework.web.reactive.function.client.ClientResponse res, 
                                                          boolean isStreaming, 
                                                          boolean isAnthropicToOpenAi) {
-        // 设置响应的 Content-Type
-        response.getHeaders().setContentType(isStreaming ? MediaType.TEXT_EVENT_STREAM : MediaType.APPLICATION_JSON);
-        
         if (isStreaming) {
             // 流式响应转换：逐个处理 SSE 事件
             return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
@@ -163,10 +152,23 @@ public class ProxyServiceImpl implements ProxyService {
                         String transformed = isAnthropicToOpenAi ? 
                                 transformerService.transformAnthropicSseToOpenAi(input) :
                                 transformerService.transformOpenAiSseToAnthropic(input);
-                                
-                        return transformed != null ? 
-                                Flux.just(response.bufferFactory().wrap(transformed.getBytes(StandardCharsets.UTF_8))) : 
-                                Flux.empty();
+                        
+                        if (transformed == null) return Flux.empty();
+                        
+                        // 清理转换后字符串中的 data: 前缀和换行符，因为 ServerSentEvent 会自动添加
+                        String cleanData = transformed;
+                        if (cleanData.startsWith(CcrConstants.SSE_DATA_PREFIX)) {
+                            cleanData = cleanData.substring(CcrConstants.SSE_DATA_PREFIX.length());
+                        }
+                        if (cleanData.endsWith(CcrConstants.SSE_LINE_SEPARATOR)) {
+                            cleanData = cleanData.substring(0, cleanData.length() - CcrConstants.SSE_LINE_SEPARATOR.length());
+                        }
+                        
+                        return Flux.just(ServerSentEvent.<String>builder()
+                                .event(sse.event())
+                                .id(sse.id())
+                                .data(cleanData)
+                                .build());
                     });
         } else {
             // 普通 JSON 响应转换
@@ -174,7 +176,7 @@ public class ProxyServiceImpl implements ProxyService {
                     .map((String b) -> isAnthropicToOpenAi ? 
                             transformerService.transformAnthropicResponseToOpenAi(b) :
                             transformerService.transformOpenAiResponseToAnthropic(b))
-                    .map((String b) -> response.bufferFactory().wrap(b.getBytes(StandardCharsets.UTF_8)))
+                    .map(data -> ServerSentEvent.<String>builder().data(data).build())
                     .flux();
         }
     }

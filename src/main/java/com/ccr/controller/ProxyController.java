@@ -3,8 +3,7 @@ package com.ccr.controller;
 import com.ccr.service.ProxyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,23 +27,21 @@ public class ProxyController {
      * 处理 Anthropic 格式的请求 (/v1/messages)
      * 
      * @param body 请求体字符串
-     * @param response ServerHttpResponse 对象，用于设置状态码和响应头
-     * @return 响应数据流 (Flux<DataBuffer>)
+     * @return 响应数据流 (Flux<ServerSentEvent<String>>)
      */
     @PostMapping("/v1/messages")
-    public Flux<DataBuffer> proxyMessages(@RequestBody String body, ServerHttpResponse response) {
-        return proxyService.proxyRequest(body, false, response);
+    public Flux<ServerSentEvent<String>> proxyMessages(@RequestBody String body) {
+        return proxyService.proxyRequest(body, false);
     }
 
     /**
      * 处理 OpenAI 格式的请求 (/v1/chat/completions)
      * 
      * @param body 请求体字符串
-     * @param response ServerHttpResponse 对象，用于设置状态码和响应头
-     * @return 响应数据流 (Flux<DataBuffer>)
+     * @return 响应数据流 (Flux<ServerSentEvent<String>>)
      */
     @PostMapping("/v1/chat/completions")
-    public Flux<DataBuffer> proxyChatCompletions(@RequestBody String body, ServerHttpResponse response) {
-        return proxyService.proxyRequest(body, true, response);
+    public Flux<ServerSentEvent<String>> proxyChatCompletions(@RequestBody String body) {
+        return proxyService.proxyRequest(body, true);
     }
 }
