@@ -173,9 +173,15 @@ public class TransformerServiceImpl implements TransformerService {
 
             if (root.has(CcrConstants.FIELD_USAGE)) {
                 ObjectNode usage = objectMapper.createObjectNode();
-                JsonNode antUsage = root.get(CcrConstants.FIELD_USAGE);
-                usage.put(CcrConstants.FIELD_INPUT_TOKENS, antUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? antUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
-                usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, antUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? antUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
+                JsonNode openAiUsage = root.get(CcrConstants.FIELD_USAGE);
+                usage.put(CcrConstants.FIELD_INPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
+                usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
+                antResp.set(CcrConstants.FIELD_USAGE, usage);
+            } else {
+                // Anthropic requires usage field
+                ObjectNode usage = objectMapper.createObjectNode();
+                usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
+                usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
                 antResp.set(CcrConstants.FIELD_USAGE, usage);
             }
 
@@ -229,13 +235,30 @@ public class TransformerServiceImpl implements TransformerService {
                 d.put(CcrConstants.FIELD_TEXT, delta.get(CcrConstants.FIELD_CONTENT).asText());
                 content.set(CcrConstants.FIELD_DELTA, d);
                 return CcrConstants.SSE_DATA_PREFIX + content.toString() + CcrConstants.SSE_LINE_SEPARATOR;
-            } else if (finishReason != null) {
+            } else if (finishReason != null || root.has(CcrConstants.FIELD_USAGE)) {
                 // message_delta
                 ObjectNode end = objectMapper.createObjectNode();
                 end.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_DELTA);
                 ObjectNode d = objectMapper.createObjectNode();
-                d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP.equals(finishReason) ? CcrConstants.ANT_STOP_REASON_END_TURN : finishReason);
+                if (finishReason != null) {
+                    d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP.equals(finishReason) ? CcrConstants.ANT_STOP_REASON_END_TURN : finishReason);
+                } else {
+                    d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.ANT_STOP_REASON_END_TURN);
+                }
                 end.set(CcrConstants.FIELD_DELTA, d);
+
+                // Add usage if available
+                ObjectNode usage = objectMapper.createObjectNode();
+                if (root.has(CcrConstants.FIELD_USAGE)) {
+                    JsonNode openAiUsage = root.get(CcrConstants.FIELD_USAGE);
+                    usage.put(CcrConstants.FIELD_INPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
+                    usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
+                } else {
+                    usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
+                    usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
+                }
+                end.set(CcrConstants.FIELD_USAGE, usage);
+
                 return CcrConstants.SSE_DATA_PREFIX + end.toString() + CcrConstants.SSE_LINE_SEPARATOR;
             }
 
