@@ -116,18 +116,19 @@ public class ProxyServiceImpl implements ProxyService {
                     boolean isStreaming = contentType != null && contentType.toString().contains(CcrConstants.MEDIA_TYPE_EVENT_STREAM);
 
                     // 判断是否需要进行响应格式转换（SSE 或普通 JSON）
-                    if (isIncomingOpenAi && isOutgoingAnthropic) {
-                        // 输入是 OpenAI，输出是 Anthropic -> 需要将 Anthropic 响应转回 OpenAI 格式
-                        return handleResponseTransformation(res, isStreaming, true);
-                    } else if (!isIncomingOpenAi && !isOutgoingAnthropic) {
-                        // 输入是 Anthropic，输出是 OpenAI -> 需要将 OpenAI 响应转回 Anthropic 格式
-                        return handleResponseTransformation(res, isStreaming, false);
+                    if (isIncomingOpenAi != isOutgoingAnthropic) {
+                        // 如果一端是 OpenAI，另一端是 Anthropic，则需要转换
+                        // isIncomingOpenAi = true && isOutgoingAnthropic = false -> OpenAI 转 Anthropic
+                        // isIncomingOpenAi = false && isOutgoingAnthropic = true -> Anthropic 转 OpenAI
+                        return handleResponseTransformation(res, isStreaming, !isIncomingOpenAi);
                     } else {
                         // 协议一致（均为 OpenAI 或均为 Anthropic），直接透传原始数据流
                         if (isStreaming) {
-                            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {});
+                            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
+                                    .doOnNext(sse -> log.info("Upstream response (Stream): {}", sse.data()));
                         } else {
                             return res.bodyToMono(String.class)
+                                    .doOnNext(data -> log.info("Upstream response (JSON): {}", data))
                                     .map(data -> ServerSentEvent.<String>builder().data(data).build())
                                     .flux();
                         }
@@ -163,6 +164,8 @@ public class ProxyServiceImpl implements ProxyService {
                         if (cleanData.endsWith(CcrConstants.SSE_LINE_SEPARATOR)) {
                             cleanData = cleanData.substring(0, cleanData.length() - CcrConstants.SSE_LINE_SEPARATOR.length());
                         }
+
+                        System.out.println("*3"+ cleanData);
                         
                         return Flux.just(ServerSentEvent.<String>builder()
                                 .event(sse.event())
@@ -176,6 +179,7 @@ public class ProxyServiceImpl implements ProxyService {
                     .map((String b) -> isAnthropicToOpenAi ? 
                             transformerService.transformAnthropicResponseToOpenAi(b) :
                             transformerService.transformOpenAiResponseToAnthropic(b))
+                    .doOnNext(data -> System.out.println("*4"+data))
                     .map(data -> ServerSentEvent.<String>builder().data(data).build())
                     .flux();
         }

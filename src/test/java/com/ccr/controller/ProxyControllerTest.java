@@ -4,6 +4,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -18,8 +20,12 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
@@ -58,11 +64,23 @@ public class ProxyControllerTest {
         registry.add("ccr.providers[2].name", () -> "openai-p");
         registry.add("ccr.providers[2].url", () -> baseUrl + "/openai/v1/chat/completions");
         registry.add("ccr.providers[2].apiKey", () -> "openai-key");
+        registry.add("ccr.providers[2].transformer.use[0]", () -> "OpenAI");
 
         registry.add("ccr.router.default", () -> "zhipu,model-1");
         registry.add("ccr.router.think", () -> "think-p,model-2");
         registry.add("ccr.router.longContextThreshold", () -> "10");
         registry.add("ccr.router.longContext", () -> "think-p,long-model");
+    }
+
+    @BeforeEach
+    void cleanRequests() {
+        while (mockBackEnd.getRequestCount() > 0) {
+            try {
+                mockBackEnd.takeRequest(1, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
     }
 
     /**
@@ -95,6 +113,8 @@ public class ProxyControllerTest {
         assertThat(combined).contains("Hello Anthropic");
         assertThat(combined).contains("assistant");
         assertThat(combined).contains("usage");
+        assertThat(combined).contains("input_tokens");
+        assertThat(combined).contains("output_tokens");
 
         // 3. Verify Request was transformed to OpenAI
         var recordedRequest = mockBackEnd.takeRequest();
@@ -144,6 +164,9 @@ public class ProxyControllerTest {
         assertThat(fullResponse).contains("Hello");
         assertThat(fullResponse).contains("message_delta");
         assertThat(fullResponse).contains("end_turn");
+        assertThat(fullResponse).contains("usage");
+        assertThat(fullResponse).contains("input_tokens");
+        assertThat(fullResponse).contains("output_tokens");
     }
 
     /**
@@ -225,6 +248,54 @@ public class ProxyControllerTest {
         assertThat(combined).contains("Hello");
         assertThat(combined).contains(" Stream");
         assertThat(combined).contains("chat.completion.chunk");
+    }
+
+    /**
+     * 验证包含推理内容（reasoning_content）的 OpenAI 流式响应转换。
+     * 针对 GLM-5.1 和 MiniMax-2.7 的推理功能进行强化验证。
+     */
+    @Test
+    @Order(3)
+    public void testProxyChatCompletionsStreamingWithReasoning() throws Exception {
+        String openaiChunk1 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n";
+        String openaiChunk2 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"thinking...\"},\"finish_reason\":null}]}\n\n";
+        String openaiChunk3 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n";
+        String openaiChunk4 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n";
+        String openaiDone = "data: [DONE]\n\n";
+
+        mockBackEnd.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(openaiChunk1 + openaiChunk2 + openaiChunk3 + openaiChunk4 + openaiDone));
+
+        // 显式指定使用目标供应商，避免路由选择默认的 zhipu (Anthropic)
+        String requestBody = "{\"model\":\"openai-p,glm-5.1\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}";
+
+        webTestClient.post()
+                .uri("/v1/chat/completions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(requestBody)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+                .expectBodyList(String.class)
+                .consumeWith(result -> {
+                    List<String> body = result.getResponseBody();
+                    assertNotNull(body);
+                    String fullResponse = String.join("", body);
+
+                    // 验证是否包含 message_start
+                    assertTrue(fullResponse.contains("message_start"));
+                    // 验证是否包含普通内容
+                    assertTrue(fullResponse.contains("hello"));
+                    // 验证是否包含推理内容对应的 thinking_delta (由 Transformer 转换)
+                    assertTrue(fullResponse.contains("thinking_delta"));
+                    assertTrue(fullResponse.contains("thinking..."));
+                    // 验证是否包含 message_delta 且包含关键的 usage 字段
+                    assertTrue(fullResponse.contains("message_delta"));
+                    assertTrue(fullResponse.contains("input_tokens"));
+                    assertTrue(fullResponse.contains("output_tokens"));
+                });
     }
 
     /**
@@ -316,5 +387,35 @@ public class ProxyControllerTest {
         var recordedRequest = mockBackEnd.takeRequest();
         assertThat(recordedRequest.getPath()).isEqualTo("/think/v1/messages");
         assertThat(recordedRequest.getHeader("x-api-key")).isEqualTo("think-key");
+    }
+    /**
+     * 验证 Anthropic 接口在显式指定 Accept: application/json 时的兼容性
+     * 防止 Spring 返回 406 Not Acceptable 错误
+     */
+    @Test
+    public void testProxyMessagesWithJsonAcceptHeader() {
+        String responseBody = "{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
+        
+        mockBackEnd.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .setBody(responseBody));
+
+        String requestBody = "{\"model\":\"model-1\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
+
+        webTestClient.post()
+                .uri("/v1/messages")
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .bodyValue(requestBody)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+                .expectBody()
+                .consumeWith(result -> {
+                    byte[] responseBytes = result.getResponseBody();
+                    String body = responseBytes != null ? new String(responseBytes) : "";
+                    assertTrue(body.contains("Hello"));
+                });
     }
 }

@@ -5,12 +5,13 @@ This is a Java (Spring Boot) implementation of the Claude Code Router core proxy
 
 **Current Status**: Verified Working. 
 The module correctly handles both streaming and non-streaming requests from Claude Code and forwards them to Zhipu AI (or any Anthropic-compatible API).
-It also supports the `/v1/chat/completions` endpoint and provides automatic protocol transformation between OpenAI and Anthropic formats.
+It also supports the `/v1/chat/completions` endpoint and provides automatic protocol transformation between OpenAI and Anthropic formats. It is highly compatible with various clients by supporting both `application/json` and `text/event-stream` accept headers.
 
 ## Working Environment
 - **Java Version**: 17
 - **Framework**: Spring Boot 3.2.5 (WebFlux)
 - **Port**: 3456 (default)
+- **Compatibility**: Supports `Accept: application/json` even for streaming endpoints to prevent 406 errors.
 - **Target URL**: Configured in `src/main/resources/application.properties`
 
 ## Build and Run Commands
@@ -53,6 +54,7 @@ mvn test
 Before submitting any changes to this module:
 - [ ] `mvn test` passes.
 - [ ] Manual verification with `curl` for both streaming (`Accept: text/event-stream`) and non-streaming responses.
+- [ ] Verify compatibility with `Accept: application/json` header for `/v1/messages`.
 - [ ] (Optional) Launch Claude Code with `--settings` pointing to this local server to verify end-to-end functionality.
 
 ## Roadmap / Missing Features (Compared to TS version)

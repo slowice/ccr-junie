@@ -225,14 +225,21 @@ public class TransformerServiceImpl implements TransformerService {
                 message.set(CcrConstants.FIELD_CONTENT, objectMapper.createArrayNode());
                 start.set(CcrConstants.FIELD_MESSAGE, message);
                 return CcrConstants.SSE_DATA_PREFIX + start.toString() + CcrConstants.SSE_LINE_SEPARATOR;
-            } else if (delta != null && delta.has(CcrConstants.FIELD_CONTENT)) {
+            } else if (delta != null && (delta.has(CcrConstants.FIELD_CONTENT) || delta.has("reasoning_content"))) {
                 // content_block_delta
                 ObjectNode content = objectMapper.createObjectNode();
                 content.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
                 content.put(CcrConstants.FIELD_INDEX, 0);
                 ObjectNode d = objectMapper.createObjectNode();
-                d.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TEXT_DELTA);
-                d.put(CcrConstants.FIELD_TEXT, delta.get(CcrConstants.FIELD_CONTENT).asText());
+                
+                if (delta.has("reasoning_content")) {
+                    d.put(CcrConstants.FIELD_TYPE, "thinking_delta");
+                    d.put("thinking", delta.get("reasoning_content").asText());
+                } else {
+                    d.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TEXT_DELTA);
+                    d.put(CcrConstants.FIELD_TEXT, delta.get(CcrConstants.FIELD_CONTENT).asText());
+                }
+                
                 content.set(CcrConstants.FIELD_DELTA, d);
                 return CcrConstants.SSE_DATA_PREFIX + content.toString() + CcrConstants.SSE_LINE_SEPARATOR;
             } else if (finishReason != null || root.has(CcrConstants.FIELD_USAGE)) {
