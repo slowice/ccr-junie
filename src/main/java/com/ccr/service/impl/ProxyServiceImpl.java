@@ -2,6 +2,7 @@ package com.ccr.service.impl;
 
 import com.ccr.config.CcrConfig;
 import com.ccr.constant.CcrConstants;
+import com.ccr.model.StreamContext;
 import com.ccr.service.ProxyService;
 import com.ccr.service.RouterService;
 import com.ccr.service.RouterService.RouteResult;
@@ -54,6 +55,7 @@ public class ProxyServiceImpl implements ProxyService {
      */
     @Override
     public Flux<ServerSentEvent<String>> proxyRequest(String body, boolean isIncomingOpenAi) {
+        log.info("Incoming request: body={}, isIncomingOpenAi={}", body, isIncomingOpenAi);
         // 1. 获取路由信息：决定使用哪个供应商及目标模型
         RouteResult route = routerService.getRoute(body);
         CcrConfig.Provider provider = route.getProvider();
@@ -74,6 +76,8 @@ public class ProxyServiceImpl implements ProxyService {
      * 根据协议差异转换请求内容
      */
     private String transformRequest(String body, boolean isIncomingOpenAi, boolean isOutgoingAnthropic, String targetModel) {
+        log.info("Transforming request: isIncomingOpenAi={}, isOutgoingAnthropic={}, targetModel={}", isIncomingOpenAi, isOutgoingAnthropic, targetModel);
+        log.debug("Original request body: {}", body);
         String finalBody = body;
         // 如果输入是 OpenAI 格式但输出是 Anthropic 格式，进行转换
         if (isIncomingOpenAi && isOutgoingAnthropic) {
@@ -94,6 +98,7 @@ public class ProxyServiceImpl implements ProxyService {
         } catch (Exception e) {
             log.error("Failed to update model name: {}", e.getMessage());
         }
+        log.info("Final transformed request body: {}", finalBody);
         return finalBody;
     }
 
@@ -102,6 +107,7 @@ public class ProxyServiceImpl implements ProxyService {
      */
     private Flux<ServerSentEvent<String>> forwardToUpstream(String requestBody, CcrConfig.Provider provider, 
                                              boolean isIncomingOpenAi, boolean isOutgoingAnthropic) {
+        StreamContext streamContext = new StreamContext();
         return webClient.post()
                 .uri(provider.getUrl())
                 // 根据供应商协议设置认证 Header
@@ -116,18 +122,21 @@ public class ProxyServiceImpl implements ProxyService {
                     boolean isStreaming = contentType != null && contentType.toString().contains(CcrConstants.MEDIA_TYPE_EVENT_STREAM);
 
                     // 判断是否需要进行响应格式转换（SSE 或普通 JSON）
-                    if (isIncomingOpenAi && isOutgoingAnthropic) {
-                        // 输入是 OpenAI，输出是 Anthropic -> 需要将 Anthropic 响应转回 OpenAI 格式
-                        return handleResponseTransformation(res, isStreaming, true);
-                    } else if (!isIncomingOpenAi && !isOutgoingAnthropic) {
-                        // 输入是 Anthropic，输出是 OpenAI -> 需要将 OpenAI 响应转回 Anthropic 格式
-                        return handleResponseTransformation(res, isStreaming, false);
+                    if (isIncomingOpenAi == isOutgoingAnthropic) {
+                        log.info("Converting response: IncomingOpenAi={}, OutgoingAnthropic={}", isIncomingOpenAi, isOutgoingAnthropic);
+                        // 如果 isIncomingOpenAi 为 true (OpenAI)，且 isOutgoingAnthropic 为 true (Anthropic)
+                        // 则上游返回的是 Anthropic，需要执行 AnthropicToOpenAi 转换
+                        return handleResponseTransformation(res, isStreaming, isIncomingOpenAi, streamContext);
                     } else {
-                        // 协议一致（均为 OpenAI 或均为 Anthropic），直接透传原始数据流
+                        log.info("Passthrough response: Streaming={}", isStreaming);
+                        // 协议一致，直接透传
                         if (isStreaming) {
-                            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {});
+                            return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
+                                    .doOnNext(sse -> log.info("Upstream response (Stream): data={}, event={}", sse.data(), sse.event()))
+                                    .filter(sse -> sse.data() != null && !sse.data().isBlank());
                         } else {
                             return res.bodyToMono(String.class)
+                                    .doOnNext(data -> log.info("Upstream response (JSON): {}", data))
                                     .map(data -> ServerSentEvent.<String>builder().data(data).build())
                                     .flux();
                         }
@@ -140,42 +149,68 @@ public class ProxyServiceImpl implements ProxyService {
      */
     private Flux<ServerSentEvent<String>> handleResponseTransformation(org.springframework.web.reactive.function.client.ClientResponse res, 
                                                          boolean isStreaming, 
-                                                         boolean isAnthropicToOpenAi) {
+                                                         boolean isAnthropicToOpenAi,
+                                                         StreamContext streamContext) {
         if (isStreaming) {
             // 流式响应转换：逐个处理 SSE 事件
             return res.bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
                     .flatMap(sse -> {
                         String data = sse.data();
+                        log.info("Upstream response (Stream): event={}, data={}", sse.event(), data);
                         if (data == null) return Flux.empty();
                         
                         String input = CcrConstants.SSE_DATA_PREFIX + data + CcrConstants.SSE_LINE_SEPARATOR;
                         String transformed = isAnthropicToOpenAi ? 
                                 transformerService.transformAnthropicSseToOpenAi(input) :
-                                transformerService.transformOpenAiSseToAnthropic(input);
+                                transformerService.transformOpenAiSseToAnthropic(input, streamContext);
                         
-                        if (transformed == null) return Flux.empty();
-                        
-                        // 清理转换后字符串中的 data: 前缀和换行符，因为 ServerSentEvent 会自动添加
-                        String cleanData = transformed;
-                        if (cleanData.startsWith(CcrConstants.SSE_DATA_PREFIX)) {
-                            cleanData = cleanData.substring(CcrConstants.SSE_DATA_PREFIX.length());
+                        if (transformed == null) {
+                            log.info("Transformed response (Stream) is null, skipping");
+                            return Flux.empty();
                         }
-                        if (cleanData.endsWith(CcrConstants.SSE_LINE_SEPARATOR)) {
-                            cleanData = cleanData.substring(0, cleanData.length() - CcrConstants.SSE_LINE_SEPARATOR.length());
-                        }
-                        
-                        return Flux.just(ServerSentEvent.<String>builder()
-                                .event(sse.event())
-                                .id(sse.id())
-                                .data(cleanData)
-                                .build());
+
+                        // 处理转换后可能包含多个 SSE 事件的情况
+                        String[] parts = transformed.split(CcrConstants.SSE_LINE_SEPARATOR);
+                        return Flux.fromArray(parts)
+                                .filter(part -> !part.isBlank())
+                                .map(part -> {
+                                    String cleanData = part;
+                                    if (cleanData.startsWith(CcrConstants.SSE_DATA_PREFIX)) {
+                                        cleanData = cleanData.substring(CcrConstants.SSE_DATA_PREFIX.length());
+                                    }
+                                    
+                                    // 特殊处理 [DONE]
+                                    if (cleanData.equals(CcrConstants.SSE_DONE)) {
+                                        log.info("Transformed response (Stream DONE)");
+                                        return ServerSentEvent.<String>builder().data(CcrConstants.SSE_DONE).build();
+                                    }
+
+                                    String eventType = null;
+                                    try {
+                                        JsonNode json = objectMapper.readTree(cleanData);
+                                        if (json.has(CcrConstants.FIELD_TYPE)) {
+                                            eventType = json.get(CcrConstants.FIELD_TYPE).asText();
+                                        }
+                                    } catch (Exception e) {
+                                        // 可能是非 JSON 数据，透传原始事件类型
+                                        eventType = sse.event();
+                                    }
+
+                                    log.info("Transformed response (Stream): event={}, data={}", eventType, cleanData);
+                                    return ServerSentEvent.<String>builder()
+                                            .event(eventType)
+                                            .data(cleanData)
+                                            .build();
+                                });
                     });
         } else {
             // 普通 JSON 响应转换
             return res.bodyToMono(String.class)
+                    .doOnNext(body -> log.info("Upstream response (JSON): {}", body))
                     .map((String b) -> isAnthropicToOpenAi ? 
                             transformerService.transformAnthropicResponseToOpenAi(b) :
                             transformerService.transformOpenAiResponseToAnthropic(b))
+                    .doOnNext(data -> log.info("Transformed response (JSON): {}", data))
                     .map(data -> ServerSentEvent.<String>builder().data(data).build())
                     .flux();
         }

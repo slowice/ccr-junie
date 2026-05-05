@@ -3,6 +3,7 @@ package com.ccr.controller;
 import com.ccr.service.ProxyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,7 +30,7 @@ public class ProxyController {
      * @param body 请求体字符串
      * @return 响应数据流 (Flux<ServerSentEvent<String>>)
      */
-    @PostMapping("/v1/messages")
+    @PostMapping(value = "/v1/messages", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Flux<ServerSentEvent<String>> proxyMessages(@RequestBody String body) {
         return proxyService.proxyRequest(body, false);
     }
@@ -40,7 +41,7 @@ public class ProxyController {
      * @param body 请求体字符串
      * @return 响应数据流 (Flux<ServerSentEvent<String>>)
      */
-    @PostMapping("/v1/chat/completions")
+    @PostMapping(value = "/v1/chat/completions", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Flux<ServerSentEvent<String>> proxyChatCompletions(@RequestBody String body) {
         return proxyService.proxyRequest(body, true);
     }

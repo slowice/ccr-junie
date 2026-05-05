@@ -37,6 +37,13 @@ public class CcrConstants {
     public static final String FIELD_OUTPUT_TOKENS = "output_tokens";
     public static final String FIELD_ID = "id";
     public static final String FIELD_STOP_REASON = "stop_reason";
+    public static final String FIELD_STOP_SEQUENCE = "stop_sequence";
+    public static final String FIELD_FINISH_REASON = "finish_reason";
+    public static final String FIELD_TOOL_CALLS = "tool_calls";
+    public static final String FIELD_ANNOTATIONS = "annotations";
+    public static final String FIELD_REASONING_CONTENT = "reasoning_content";
+    public static final String FIELD_THINKING_CONTENT = "thinking";
+    public static final String FIELD_CACHE_READ_INPUT_TOKENS = "cache_read_input_tokens";
 
     /**
      * 角色定义
@@ -60,6 +67,9 @@ public class CcrConstants {
     public static final String OPENAI_FINISH_REASON_STOP = "stop";
     public static final String OPENAI_CHOICES = "choices";
     public static final String OPENAI_FINISH_REASON = "finish_reason";
+    public static final String OPENAI_FINISH_REASON_LENGTH = "length";
+    public static final String OPENAI_FINISH_REASON_TOOL_CALLS = "tool_calls";
+    public static final String OPENAI_FINISH_REASON_CONTENT_FILTER = "content_filter";
 
     /**
      * Anthropic 协议相关常量
@@ -68,6 +78,15 @@ public class CcrConstants {
     public static final String ANT_STOP_REASON_END_TURN = "end_turn";
     public static final String ANT_TYPE_TEXT_DELTA = "text_delta";
     public static final String ANT_TOOL_WEB_SEARCH = "web_search";
+    public static final String ANT_STOP_REASON_MAX_TOKENS = "max_tokens";
+    public static final String ANT_STOP_REASON_TOOL_USE = "tool_use";
+    public static final String ANT_STOP_REASON_STOP_SEQUENCE = "stop_sequence";
+    public static final String ANT_TYPE_INPUT_JSON_DELTA = "input_json_delta";
+    public static final String ANT_TYPE_THINKING_DELTA = "thinking_delta";
+    public static final String ANT_TYPE_SIGNATURE_DELTA = "signature_delta";
+    public static final String ANT_TYPE_TOOL_USE = "tool_use";
+    public static final String ANT_EVENT_CONTENT_BLOCK_START = "content_block_start";
+    public static final String ANT_EVENT_CONTENT_BLOCK_STOP = "content_block_stop";
 
     /**
      * Anthropic SSE 事件类型
@@ -92,4 +111,5 @@ public class CcrConstants {
     public static final String SSE_DATA_PREFIX = "data: ";
     public static final String SSE_DONE = "[DONE]";
     public static final String SSE_LINE_SEPARATOR = "\n\n";
+    public static final String ANT_EVENT_MESSAGE_STOP = "message_stop";
 }

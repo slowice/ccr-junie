@@ -1,4 +1,5 @@
 com/ccr/service/RouterService.class
+com/ccr/model/StreamContext.class
 com/ccr/constant/CcrConstants.class
 com/ccr/service/impl/ProxyServiceImpl.class
 com/ccr/service/RouterService$RouteResult.class

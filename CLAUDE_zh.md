@@ -5,12 +5,13 @@
 
 **当前状态**：已验证正常工作。
 该模块能够正确处理来自 Claude Code 的流式和非流式请求，并将其转发至智谱 AI（或任何兼容 Anthropic 的 API）。
-此外，它还支持 `/v1/chat/completions` 接口，并提供 OpenAI 与 Anthropic 格式之间的自动协议转换。
+此外，它还支持 `/v1/chat/completions` 接口，并提供 OpenAI 与 Anthropic 格式之间的自动协议转换。通过同时支持 `application/json` 和 `text/event-stream` 的 Accept 头部，实现了对多种客户端的高度兼容。
 
 ## 运行环境
 - **Java 版本**: 17
 - **框架**: Spring Boot 3.2.5 (WebFlux)
 - **端口**: 3456 (默认)
+- **兼容性**: 为流式端点提供 `Accept: application/json` 支持，防止 406 错误。
 - **目标 URL**: 在 `src/main/resources/application.properties` 中配置
 
 ## 构建与运行命令
@@ -53,6 +54,7 @@ mvn test
 在提交对此模块的任何更改前：
 - [ ] `mvn test` 通过。
 - [ ] 使用 `curl` 手动验证流式 (`Accept: text/event-stream`) 和非流式响应。
+- [ ] 验证 `/v1/messages` 接口对 `Accept: application/json` 头的兼容性。
 - [ ] (可选) 使用 `--settings` 指向此本地服务器启动 Claude Code，验证端到端功能。
 
 ## 路线图 / 缺失特性 (对比 TS 版本)

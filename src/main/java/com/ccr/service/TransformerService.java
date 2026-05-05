@@ -1,5 +1,7 @@
 package com.ccr.service;
 
+import com.ccr.model.StreamContext;
+
 /**
  * 协议转换服务接口，负责在 OpenAI 和 Anthropic 两种协议格式之间进行双向转换
  */
@@ -23,7 +25,7 @@ public interface TransformerService {
     /**
      * 将 OpenAI SSE 事件转换为 Anthropic SSE 事件
      */
-    String transformOpenAiSseToAnthropic(String line);
+    String transformOpenAiSseToAnthropic(String line, StreamContext context);
 
     /**
      * 将 Anthropic 响应转换为 OpenAI 格式 (非流式)
