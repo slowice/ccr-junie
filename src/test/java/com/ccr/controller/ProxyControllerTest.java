@@ -18,6 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
 import java.io.IOException;
 import java.util.List;
@@ -109,12 +110,16 @@ public class ProxyControllerTest {
                 .returnResult(String.class)
                 .getResponseBody();
 
-        String combined = result.collectList().block().stream().collect(java.util.stream.Collectors.joining());
-        assertThat(combined).contains("Hello Anthropic");
-        assertThat(combined).contains("assistant");
-        assertThat(combined).contains("usage");
-        assertThat(combined).contains("input_tokens");
-        assertThat(combined).contains("output_tokens");
+        StepVerifier.create(result.collectList())
+                .assertNext(list -> {
+                    String combined = String.join("", list);
+                    assertThat(combined).contains("Hello Anthropic");
+                    assertThat(combined).contains("assistant");
+                    assertThat(combined).contains("usage");
+                    assertThat(combined).contains("input_tokens");
+                    assertThat(combined).contains("output_tokens");
+                })
+                .verifyComplete();
 
         // 3. Verify Request was transformed to OpenAI
         var recordedRequest = mockBackEnd.takeRequest();
@@ -158,15 +163,19 @@ public class ProxyControllerTest {
                 .getResponseBody();
 
         // 3. Verify transformed SSE events
-        String fullResponse = String.join("", result.collectList().block());
-        assertThat(fullResponse).contains("message_start");
-        assertThat(fullResponse).contains("content_block_delta");
-        assertThat(fullResponse).contains("Hello");
-        assertThat(fullResponse).contains("message_delta");
-        assertThat(fullResponse).contains("end_turn");
-        assertThat(fullResponse).contains("usage");
-        assertThat(fullResponse).contains("input_tokens");
-        assertThat(fullResponse).contains("output_tokens");
+        StepVerifier.create(result.collectList())
+                .assertNext(list -> {
+                    String fullResponse = String.join("", list);
+                    assertThat(fullResponse).contains("message_start");
+                    assertThat(fullResponse).contains("content_block_delta");
+                    assertThat(fullResponse).contains("Hello");
+                    assertThat(fullResponse).contains("message_delta");
+                    assertThat(fullResponse).contains("end_turn");
+                    assertThat(fullResponse).contains("usage");
+                    assertThat(fullResponse).contains("input_tokens");
+                    assertThat(fullResponse).contains("output_tokens");
+                })
+                .verifyComplete();
     }
 
     /**
@@ -195,9 +204,13 @@ public class ProxyControllerTest {
                 .returnResult(String.class)
                 .getResponseBody();
 
-        String combined = result.collectList().block().stream().collect(java.util.stream.Collectors.joining());
-        assertThat(combined).contains("Hello OpenAI");
-        assertThat(combined).contains("30");
+        StepVerifier.create(result.collectList())
+                .assertNext(list -> {
+                    String combined = String.join("", list);
+                    assertThat(combined).contains("Hello OpenAI");
+                    assertThat(combined).contains("30");
+                })
+                .verifyComplete();
 
         // 3. Verify Request was transformed to Anthropic
         var recordedRequest = mockBackEnd.takeRequest();
@@ -241,13 +254,14 @@ public class ProxyControllerTest {
                 .returnResult(String.class)
                 .getResponseBody();
 
-        String combined = result.collectList().block().stream().collect(java.util.stream.Collectors.joining());
-        
-        // 3. Verify
-        mockBackEnd.takeRequest();
-        assertThat(combined).contains("Hello");
-        assertThat(combined).contains(" Stream");
-        assertThat(combined).contains("chat.completion.chunk");
+        StepVerifier.create(result.collectList())
+                .assertNext(list -> {
+                    String combined = String.join("", list);
+                    assertThat(combined).contains("Hello");
+                    assertThat(combined).contains(" Stream");
+                    assertThat(combined).contains("chat.completion.chunk");
+                })
+                .verifyComplete();
     }
 
     /**
@@ -271,17 +285,18 @@ public class ProxyControllerTest {
         // 显式指定使用目标供应商，避免路由选择默认的 zhipu (Anthropic)
         String requestBody = "{\"model\":\"openai-p,glm-5.1\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}";
 
-        webTestClient.post()
+        Flux<String> result = webTestClient.post()
                 .uri("/v1/chat/completions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(requestBody)
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
-                .expectBodyList(String.class)
-                .consumeWith(result -> {
-                    List<String> body = result.getResponseBody();
-                    assertNotNull(body);
+                .returnResult(String.class)
+                .getResponseBody();
+
+        StepVerifier.create(result.collectList())
+                .assertNext(body -> {
                     String fullResponse = String.join("", body);
 
                     // 验证是否包含 message_start
@@ -294,8 +309,55 @@ public class ProxyControllerTest {
                     // 验证是否包含 message_delta 且包含关键的 usage 字段
                     assertTrue(fullResponse.contains("message_delta"));
                     assertTrue(fullResponse.contains("input_tokens"));
+                    assertThat(fullResponse).contains("\"input_tokens\":10");
                     assertTrue(fullResponse.contains("output_tokens"));
-                });
+                    assertThat(fullResponse).contains("\"output_tokens\":5");
+                })
+                .verifyComplete();
+    }
+
+    /**
+     * 验证 OpenAI 流式响应在缺失 Usage 字段时的异常处理。
+     * 确保即使模型未返回 Token 统计，转换后的 Anthropic 格式仍包含默认的 Usage 字段（0）。
+     */
+    @Test
+    @Order(10)
+    public void testProxyChatCompletionsStreamingMissingUsage() throws Exception {
+        String openaiChunk1 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n";
+        String openaiChunk2 = "data: {\"id\":\"1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n";
+        String openaiDone = "data: [DONE]\n\n";
+
+        mockBackEnd.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(openaiChunk1 + openaiChunk2 + openaiDone));
+
+        String requestBody = "{\"model\":\"openai-p,gpt-4\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}";
+
+        Flux<String> result = webTestClient.post()
+                .uri("/v1/chat/completions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(requestBody)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+                .returnResult(String.class)
+                .getResponseBody();
+
+        StepVerifier.create(result.collectList())
+                .assertNext(body -> {
+                    String fullResponse = String.join("", body);
+
+                    // 验证是否包含 message_start 且初始 usage 为 0
+                    assertTrue(fullResponse.contains("message_start"));
+                    assertThat(fullResponse).contains("\"input_tokens\":0");
+
+                    // 验证结束帧 message_delta 是否包含补全的 usage
+                    assertTrue(fullResponse.contains("message_delta"), "Response should contain message_delta event. Full response: " + fullResponse);
+                    assertThat(fullResponse).contains("\"input_tokens\":0");
+                    assertThat(fullResponse).contains("\"output_tokens\":0");
+                })
+                .verifyComplete();
     }
 
     /**
@@ -380,8 +442,12 @@ public class ProxyControllerTest {
                 .returnResult(String.class)
                 .getResponseBody();
 
-        String combined = result.collectList().block().stream().collect(java.util.stream.Collectors.joining());
-        assertThat(combined).contains("think-response");
+        StepVerifier.create(result.collectList())
+                .assertNext(list -> {
+                    String combined = String.join("", list);
+                    assertThat(combined).contains("think-response");
+                })
+                .verifyComplete();
 
         // 4. 验证路径切换到了 thinking-provider 的 URL
         var recordedRequest = mockBackEnd.takeRequest();

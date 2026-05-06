@@ -32,6 +32,7 @@ public class ProxyController {
      */
     @PostMapping(value = "/v1/messages", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Flux<ServerSentEvent<String>> proxyMessages(@RequestBody String body) {
+        log.info("Received Anthropic request: [POST /v1/messages], Body is: {}", body);
         return proxyService.proxyRequest(body, false);
     }
 
@@ -43,6 +44,7 @@ public class ProxyController {
      */
     @PostMapping(value = "/v1/chat/completions", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Flux<ServerSentEvent<String>> proxyChatCompletions(@RequestBody String body) {
+        log.info("Received OpenAI request: [POST /v1/chat/completions], Body length: {}", body.length());
         return proxyService.proxyRequest(body, true);
     }
 }

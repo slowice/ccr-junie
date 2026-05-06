@@ -49,6 +49,7 @@ mvn test
 2. **Reactive Implementation**: This project uses Spring WebFlux. Ensure any new features remain non-blocking.
 3. **Multi-Provider Support**: When adding new providers, update both `ccr.providers` and `ccr.router` mappings in `application.properties`.
 4. **Code Standards**: Code must be as standardized as possible. Use Loggers instead of `System.out`. Avoid hardcoded strings by using objects or constants for reusability. Service layers should follow the `Interface + Impl` pattern.
+5. **Response Handling**: Always use `ServerSentEvent<String>` for streaming to ensure strict SSE protocol compliance (correct event/data tags) and avoid malformed response errors in Claude Code.
 
 ## Verification Checklist
 Before submitting any changes to this module:

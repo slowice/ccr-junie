@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.ccr.controller.ProxyControllerTest" time="3.645" tests="1" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.ccr.controller.ProxyControllerTest" time="3.821" tests="1" errors="0" skipped="0" failures="0">
   <properties>
     <property name="socksProxyHost" value="127.0.0.1"/>
     <property name="http.proxyHost" value="127.0.0.1"/>
@@ -16,7 +16,7 @@
     <property name="sun.java.launcher" value="SUN_STANDARD"/>
     <property name="user.country" value="CN"/>
     <property name="sun.boot.library.path" value="/Users/xubin/xb/tools/jdk-17.0.12.jdk/Contents/Home/lib"/>
-    <property name="sun.java.command" value="/Users/xubin/xb/claude/ccr-junie/target/surefire/surefirebooter-20260505171647373_3.jar /Users/xubin/xb/claude/ccr-junie/target/surefire 2026-05-05T17-16-47_258-jvmRun1 surefire-20260505171647373_1tmp surefire_0-20260505171647373_2tmp"/>
+    <property name="sun.java.command" value="/Users/xubin/xb/claude/ccr-junie/target/surefire/surefirebooter-20260506112011473_3.jar /Users/xubin/xb/claude/ccr-junie/target/surefire 2026-05-06T11-20-11_379-jvmRun1 surefire-20260506112011473_1tmp surefire_0-20260506112011473_2tmp"/>
     <property name="http.nonProxyHosts" value="weather-data.apple.com|*.weather-data.apple.com|gateway.icloud.com.cn|*.gateway.icloud.com.cn|193.168.0.0/24|*.193.168.0.0/24|localhost|*.localhost|icloud.com.cn|*.icloud.com.cn|172.16.0.0/12|*.172.16.0.0/12|api.smoot.apple.com|*.api.smoot.apple.com|captive.apple.com|*.captive.apple.com|guzzoni.apple.com|*.guzzoni.apple.com|ocsp.apple.com|*.ocsp.apple.com|smoot.apple.cn|*.smoot.apple.cn|push-apple.com.akadns.net|*.push-apple.com.akadns.net|xp.apple.com|*.xp.apple.com|local|*.local|smp-device-content.apple.com|*.smp-device-content.apple.com|127.0.0.1|192.168.0.0/16|*.192.168.0.0/16|10.0.0.0/8|*.10.0.0.0/8|gateway.icloud.com|*.gateway.icloud.com|100.64.0.0/10|*.100.64.0.0/10|inappcheck.itunes.apple.com|*.inappcheck.itunes.apple.com|17.0.0.0/8|*.17.0.0.0/8|configuration.apple.com|*.configuration.apple.com|push.apple.com|*.push.apple.com|valid.apple.com|*.valid.apple.com|health.apple.com|*.health.apple.com|ess.apple.com|*.ess.apple.com"/>
     <property name="jdk.debug" value="release"/>
     <property name="test" value="ProxyControllerTest#testProxyChatCompletionsStreamingWithReasoning"/>
@@ -36,7 +36,7 @@
     <property name="java.specification.name" value="Java Platform API Specification"/>
     <property name="FILE_LOG_CHARSET" value="UTF-8"/>
     <property name="java.awt.headless" value="true"/>
-    <property name="surefire.real.class.path" value="/Users/xubin/xb/claude/ccr-junie/target/surefire/surefirebooter-20260505171647373_3.jar"/>
+    <property name="surefire.real.class.path" value="/Users/xubin/xb/claude/ccr-junie/target/surefire/surefirebooter-20260506112011473_3.jar"/>
     <property name="user.script" value="Hans"/>
     <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
     <property name="ftp.nonProxyHosts" value="weather-data.apple.com|*.weather-data.apple.com|gateway.icloud.com.cn|*.gateway.icloud.com.cn|193.168.0.0/24|*.193.168.0.0/24|localhost|*.localhost|icloud.com.cn|*.icloud.com.cn|172.16.0.0/12|*.172.16.0.0/12|api.smoot.apple.com|*.api.smoot.apple.com|captive.apple.com|*.captive.apple.com|guzzoni.apple.com|*.guzzoni.apple.com|ocsp.apple.com|*.ocsp.apple.com|smoot.apple.cn|*.smoot.apple.cn|push-apple.com.akadns.net|*.push-apple.com.akadns.net|xp.apple.com|*.xp.apple.com|local|*.local|smp-device-content.apple.com|*.smp-device-content.apple.com|127.0.0.1|192.168.0.0/16|*.192.168.0.0/16|10.0.0.0/8|*.10.0.0.0/8|gateway.icloud.com|*.gateway.icloud.com|100.64.0.0/10|*.100.64.0.0/10|inappcheck.itunes.apple.com|*.inappcheck.itunes.apple.com|17.0.0.0/8|*.17.0.0.0/8|configuration.apple.com|*.configuration.apple.com|push.apple.com|*.push.apple.com|valid.apple.com|*.valid.apple.com|health.apple.com|*.health.apple.com|ess.apple.com|*.ess.apple.com"/>
@@ -55,7 +55,7 @@
     <property name="os.arch" value="x86_64"/>
     <property name="socksProxyPort" value="8119"/>
     <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
-    <property name="PID" value="11483"/>
+    <property name="PID" value="9711"/>
     <property name="CONSOLE_LOG_CHARSET" value="UTF-8"/>
     <property name="native.encoding" value="UTF-8"/>
     <property name="java.library.path" value="/Users/xubin/Library/Java/Extensions:/Library/Java/Extensions:/Network/Library/Java/Extensions:/System/Library/Java/Extensions:/usr/lib/java:."/>
@@ -67,9 +67,9 @@
     <property name="java.class.version" value="61.0"/>
     <property name="http.proxyPort" value="8118"/>
   </properties>
-  <testcase name="testProxyChatCompletionsStreamingWithReasoning" classname="com.ccr.controller.ProxyControllerTest" time="1.162">
-    <system-out><![CDATA[17:16:48.216 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.ccr.controller.ProxyControllerTest]: ProxyControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
-17:16:48.355 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.ccr.CcrApplication for test class com.ccr.controller.ProxyControllerTest
+  <testcase name="testProxyChatCompletionsStreamingWithReasoning" classname="com.ccr.controller.ProxyControllerTest" time="1.286">
+    <system-out><![CDATA[11:20:12.329 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.ccr.controller.ProxyControllerTest]: ProxyControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+11:20:12.483 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.ccr.CcrApplication for test class com.ccr.controller.ProxyControllerTest
 
   .   ____          _            __ _ _
  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
@@ -79,16 +79,18 @@
  =========|_|==============|___/=/_/_/_/
  :: Spring Boot ::                (v3.2.5)
 
-2026-05-05T17:16:48.864+08:00  INFO 11483 --- [           main] com.ccr.controller.ProxyControllerTest   : Starting ProxyControllerTest using Java 17.0.12 with PID 11483 (started by xubin in /Users/xubin/xb/claude/ccr-junie)
-2026-05-05T17:16:48.866+08:00  INFO 11483 --- [           main] com.ccr.controller.ProxyControllerTest   : No active profile set, falling back to 1 default profile: "default"
-2026-05-05T17:16:50.485+08:00  INFO 11483 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 51327
-2026-05-05T17:16:50.493+08:00  INFO 11483 --- [           main] com.ccr.controller.ProxyControllerTest   : Started ProxyControllerTest in 1.899 seconds (process running for 3.029)
-2026-05-05T17:16:51.394+08:00  INFO 11483 --- [     parallel-1] com.ccr.service.impl.ProxyServiceImpl    : Forwarding request to provider: [openai-p] model: [glm-5.1] URL: http://localhost:51326/openai/v1/chat/completions (Anthropic: false)
-*3{"type":"message_start","message":{"id":"1","type":"message","role":"assistant","model":"unknown","content":[]}}
-*3{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"thinking..."}}
-*3{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}
-*3{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":5}}
-*3[DONE]
+2026-05-06T11:20:13.007+08:00  INFO 9711 --- [           main] com.ccr.controller.ProxyControllerTest   : Starting ProxyControllerTest using Java 17.0.12 with PID 9711 (started by xubin in /Users/xubin/xb/claude/ccr-junie)
+2026-05-06T11:20:13.008+08:00  INFO 9711 --- [           main] com.ccr.controller.ProxyControllerTest   : No active profile set, falling back to 1 default profile: "default"
+2026-05-06T11:20:14.659+08:00  INFO 9711 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 50157
+2026-05-06T11:20:14.667+08:00  INFO 9711 --- [           main] com.ccr.controller.ProxyControllerTest   : Started ProxyControllerTest in 1.928 seconds (process running for 3.118)
+2026-05-06T11:20:15.586+08:00  INFO 9711 --- [     parallel-1] com.ccr.controller.ProxyController       : Received OpenAI request: [POST /v1/chat/completions], Body length: 86
+2026-05-06T11:20:15.588+08:00  INFO 9711 --- [     parallel-1] com.ccr.service.impl.ProxyServiceImpl    : Incoming request: body={"model":"openai-p,glm-5.1","messages":[{"role":"user","content":"hi"}],"stream":true}, isIncomingOpenAi=true
+2026-05-06T11:20:15.604+08:00  INFO 9711 --- [     parallel-1] com.ccr.service.impl.ProxyServiceImpl    : Forwarding request to provider: [openai-p] model: [glm-5.1] URL: http://localhost:50156/openai/v1/chat/completions (Anthropic: false)
+2026-05-06T11:20:15.873+08:00  INFO 9711 --- [ctor-http-nio-3] com.ccr.service.impl.ProxyServiceImpl    : Transformed response (Stream): data={"type":"message_start","message":{"id":"1","type":"message","role":"assistant","model":"unknown","content":[],"usage":{"input_tokens":0,"output_tokens":0}}}, event=message_start
+2026-05-06T11:20:15.877+08:00  INFO 9711 --- [ctor-http-nio-3] com.ccr.service.impl.ProxyServiceImpl    : Transformed response (Stream): data={"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"thinking..."}}, event=content_block_delta
+2026-05-06T11:20:15.878+08:00  INFO 9711 --- [ctor-http-nio-3] com.ccr.service.impl.ProxyServiceImpl    : Transformed response (Stream): data={"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}, event=content_block_delta
+2026-05-06T11:20:15.878+08:00  INFO 9711 --- [ctor-http-nio-3] com.ccr.service.impl.ProxyServiceImpl    : Transformed response (Stream): data={"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":5}}, event=message_delta
+2026-05-06T11:20:15.879+08:00  INFO 9711 --- [ctor-http-nio-3] com.ccr.service.impl.ProxyServiceImpl    : Transformed response (Stream): data=[DONE], event=null
 ]]></system-out>
   </testcase>
 </testsuite>

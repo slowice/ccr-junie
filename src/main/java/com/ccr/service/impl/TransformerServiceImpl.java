@@ -26,7 +26,15 @@ public class TransformerServiceImpl implements TransformerService {
 
     /**
      * 将 OpenAI 格式的请求体转换为 Anthropic 格式
-     * 主要处理：模型名透传、流式开关、最大 Token (必填项补全)、温度、消息数组拆分及 System Prompt 提取
+     *
+     * <p>核心处理逻辑：</p>
+     * 1. 提取并透传模型名称 (model) 和流式开关 (stream)。
+     * 2. 补全 Anthropic 必填的 max_tokens 字段（若缺失则默认为 4096）。
+     * 3. 提取 OpenAI 消息数组中的 system 角色消息，合并为 Anthropic 的顶级 system 字段。
+     * 4. 过滤并保留 user 和 assistant 角色的消息到 Anthropic 的 messages 数组中。
+     *
+     * @param body OpenAI 协议格式的 JSON 字符串
+     * @return 转换后的 Anthropic 协议格式 JSON 字符串
      */
     @Override
     public String transformOpenAiToAnthropic(String body) {
@@ -88,7 +96,14 @@ public class TransformerServiceImpl implements TransformerService {
 
     /**
      * 将 Anthropic 格式的请求体转换为 OpenAI 格式
-     * 主要处理：模型名、流式开关、最大 Token、温度以及 System Prompt 转为消息数组首条
+     *
+     * <p>核心处理逻辑：</p>
+     * 1. 提取并透传模型名称、流式开关、最大 Token 和温度等基础参数。
+     * 2. 将 Anthropic 的顶级 system 字段转换为 OpenAI 消息数组的第一条（system 角色）。
+     * 3. 将 Anthropic 的 messages 数组追加到 OpenAI 的消息列表中。
+     *
+     * @param body Anthropic 协议格式的 JSON 字符串
+     * @return 转换后的 OpenAI 协议格式 JSON 字符串
      */
     @Override
     public String transformAnthropicToOpenAi(String body) {
@@ -140,8 +155,17 @@ public class TransformerServiceImpl implements TransformerService {
     }
 
     /**
-     * 将 OpenAI 响应转换为 Anthropic 格式 (非流式)
-     * 将 OpenAI 的 choices 数组转换为 Anthropic 的 content 数组及 usage 统计
+     * 将 OpenAI 非流式响应转换为 Anthropic 格式
+     *
+     * <p>核心处理逻辑：</p>
+     * 1. 映射消息 ID (id) 和模型名称 (model)。
+     * 2. 将 OpenAI 的 choices[0].message.content 提取并包装为 Anthropic 的 content 数组格式。
+     * 3. 映射 finish_reason（如 "stop" 映射为 "end_turn"）。
+     * 4. 转换 Token 使用情况 (usage)：将 prompt_tokens 映射为 input_tokens，将 completion_tokens 映射为 output_tokens。
+     * 5. 异常处理：若上游未返回 usage 字段，则填充默认值 0 以确保协议合规，防止客户端解析报错。
+     *
+     * @param body OpenAI 响应 JSON 字符串
+     * @return 转换后的 Anthropic 响应 JSON 字符串
      */
     @Override
     public String transformOpenAiResponseToAnthropic(String body) {
@@ -193,8 +217,18 @@ public class TransformerServiceImpl implements TransformerService {
     }
 
     /**
-     * 将 OpenAI SSE 事件转换为 Anthropic SSE 事件
-     * 将 OpenAI 的 delta 增量更新包装为 Anthropic 的 message_start, content_block_delta, message_delta 事件
+     * 将 OpenAI SSE 流式事件行转换为 Anthropic SSE 事件行
+     *
+     * <p>此方法实现了 OpenAI 流式块到 Anthropic 三阶段事件（message_start, content_block_delta, message_delta）的复杂映射：</p>
+     * 1. <b>message_start</b>: 当检测到 delta 中包含 role (assistant) 时触发，初始化消息结构并设置初始 usage。
+     * 2. <b>content_block_delta</b>: 处理 content 或 reasoning_content（推理内容）。
+     *    - 将 reasoning_content 转换为 Anthropic 的 thinking_delta 事件（适配 GLM-5.1/MiniMax-2.7）。
+     *    - 将 content 转换为标准的 text_delta 事件。
+     * 3. <b>message_delta</b>: 当检测到 finish_reason 或 usage 统计时触发，标志着生成结束或提供了最终 Token 统计。
+     *    - 关键处理：即使上游模型未在流式末尾返回 usage，也会构造包含 0 的 usage 对象，以满足 Claude Code 的强校验。
+     *
+     * @param line OpenAI 的原始 SSE 数据行（以 data: 开头）
+     * @return 转换后的 Anthropic SSE 数据行，若无需转发则返回 null
      */
     @Override
     public String transformOpenAiSseToAnthropic(String line) {
@@ -223,9 +257,19 @@ public class TransformerServiceImpl implements TransformerService {
                 message.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_ASSISTANT);
                 message.put(CcrConstants.FIELD_MODEL, root.has(CcrConstants.FIELD_MODEL) ? root.get(CcrConstants.FIELD_MODEL).asText() : "unknown");
                 message.set(CcrConstants.FIELD_CONTENT, objectMapper.createArrayNode());
+                
+                // Add initial usage
+                ObjectNode usage = objectMapper.createObjectNode();
+                usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
+                usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
+                message.set(CcrConstants.FIELD_USAGE, usage);
+                
                 start.set(CcrConstants.FIELD_MESSAGE, message);
                 return CcrConstants.SSE_DATA_PREFIX + start.toString() + CcrConstants.SSE_LINE_SEPARATOR;
-            } else if (delta != null && (delta.has(CcrConstants.FIELD_CONTENT) || delta.has("reasoning_content"))) {
+            }
+
+            // 特殊处理：如果包含 finish_reason 但没有 delta 内容，也需要触发 message_delta
+            if (delta != null && (delta.has(CcrConstants.FIELD_CONTENT) || delta.has("reasoning_content"))) {
                 // content_block_delta
                 ObjectNode content = objectMapper.createObjectNode();
                 content.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
@@ -241,32 +285,16 @@ public class TransformerServiceImpl implements TransformerService {
                 }
                 
                 content.set(CcrConstants.FIELD_DELTA, d);
-                return CcrConstants.SSE_DATA_PREFIX + content.toString() + CcrConstants.SSE_LINE_SEPARATOR;
-            } else if (finishReason != null || root.has(CcrConstants.FIELD_USAGE)) {
-                // message_delta
-                ObjectNode end = objectMapper.createObjectNode();
-                end.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_DELTA);
-                ObjectNode d = objectMapper.createObjectNode();
+                String result = CcrConstants.SSE_DATA_PREFIX + content.toString() + CcrConstants.SSE_LINE_SEPARATOR;
+                
+                // 如果这一行同时包含 finish_reason，则需要追加一个 message_delta 事件
                 if (finishReason != null) {
-                    d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP.equals(finishReason) ? CcrConstants.ANT_STOP_REASON_END_TURN : finishReason);
-                } else {
-                    d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.ANT_STOP_REASON_END_TURN);
+                    result += createMessageDelta(root, finishReason);
                 }
-                end.set(CcrConstants.FIELD_DELTA, d);
-
-                // Add usage if available
-                ObjectNode usage = objectMapper.createObjectNode();
-                if (root.has(CcrConstants.FIELD_USAGE)) {
-                    JsonNode openAiUsage = root.get(CcrConstants.FIELD_USAGE);
-                    usage.put(CcrConstants.FIELD_INPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
-                    usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
-                } else {
-                    usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
-                    usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
-                }
-                end.set(CcrConstants.FIELD_USAGE, usage);
-
-                return CcrConstants.SSE_DATA_PREFIX + end.toString() + CcrConstants.SSE_LINE_SEPARATOR;
+                return result;
+            } else if (finishReason != null || root.has(CcrConstants.FIELD_USAGE)) {
+                // 纯粹的结束帧
+                return createMessageDelta(root, finishReason);
             }
 
             return null;
@@ -277,8 +305,45 @@ public class TransformerServiceImpl implements TransformerService {
     }
 
     /**
-     * 将 Anthropic 响应转换为 OpenAI 格式 (非流式)
-     * 将 Anthropic 的 content 数组转回 OpenAI 的 choices 格式
+     * 构建 Anthropic 的 message_delta 事件
+     */
+    private String createMessageDelta(JsonNode root, String finishReason) {
+        ObjectNode end = objectMapper.createObjectNode();
+        end.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_DELTA);
+        ObjectNode d = objectMapper.createObjectNode();
+        if (finishReason != null) {
+            d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP.equals(finishReason) ? CcrConstants.ANT_STOP_REASON_END_TURN : finishReason);
+        } else {
+            d.put(CcrConstants.FIELD_STOP_REASON, CcrConstants.ANT_STOP_REASON_END_TURN);
+        }
+        end.set(CcrConstants.FIELD_DELTA, d);
+
+        // Add usage if available
+        ObjectNode usage = objectMapper.createObjectNode();
+        if (root.has(CcrConstants.FIELD_USAGE)) {
+            JsonNode openAiUsage = root.get(CcrConstants.FIELD_USAGE);
+            usage.put(CcrConstants.FIELD_INPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
+            usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
+        } else {
+            usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
+            usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
+        }
+        end.set(CcrConstants.FIELD_USAGE, usage);
+
+        return CcrConstants.SSE_DATA_PREFIX + end.toString() + CcrConstants.SSE_LINE_SEPARATOR;
+    }
+
+    /**
+     * 将 Anthropic 非流式响应转换为 OpenAI 格式
+     *
+     * <p>核心处理逻辑：</p>
+     * 1. 生成 OpenAI 格式的 ID (chatcmpl-xxx) 和对象类型 (chat.completion)。
+     * 2. 将 Anthropic 的 content[0].text 提取并放入 OpenAI 的 choices 数组中。
+     * 3. 转换 Token 使用情况 (usage)：双向映射 input_tokens -> prompt_tokens 和 output_tokens -> completion_tokens。
+     * 4. 计算并补全 total_tokens。
+     *
+     * @param body Anthropic 响应 JSON 字符串
+     * @return 转换后的 OpenAI 响应 JSON 字符串
      */
     @Override
     public String transformAnthropicResponseToOpenAi(String body) {
@@ -327,8 +392,15 @@ public class TransformerServiceImpl implements TransformerService {
     }
 
     /**
-     * 将 Anthropic SSE 事件转换为 OpenAI SSE 事件 (极简版)
-     * 将 Anthropic 的三阶段事件映射回 OpenAI 的 chunk 增量更新
+     * 将 Anthropic SSE 事件行转换为 OpenAI SSE 事件行
+     *
+     * <p>核心处理逻辑：</p>
+     * 1. 将 Anthropic 的 message_start 事件转换为包含 role: assistant 的 OpenAI chunk。
+     * 2. 将 content_block_delta 事件提取 text 后包装为 OpenAI 的 content 增量块。
+     * 3. 将 message_delta 事件识别为 OpenAI 的结束块 (finish_reason: stop)。
+     *
+     * @param line Anthropic 的原始 SSE 数据行（以 data: 开头）
+     * @return 转换后的 OpenAI SSE 数据行，若无需转发则返回 null
      */
     @Override
     public String transformAnthropicSseToOpenAi(String line) {
