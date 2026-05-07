@@ -1,6 +1,8 @@
 package com.ccr.model;
 
 import lombok.Data;
+import java.util.HashMap;
+import java.util.Map;
 
 @Data
 public class StreamContext {
@@ -12,4 +14,5 @@ public class StreamContext {
     private int thinkingBlockIndex = -1;
     private int textBlockIndex = -1;
     private String model = "unknown";
+    private Map<Integer, Integer> toolCallIndexToContentBlockIndex = new HashMap<>();
 }
