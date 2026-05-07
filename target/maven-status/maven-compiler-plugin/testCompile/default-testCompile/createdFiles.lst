@@ -1,1 +1,3 @@
-com/ccr/controller/ProxyControllerTest.class
+com/ccr/service/impl/ProxyServiceImplTest.class
+com/ccr/service/impl/RouterServiceImplTest.class
+com/ccr/service/impl/TransformerServiceImplTest.class

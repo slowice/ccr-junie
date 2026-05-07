@@ -3,6 +3,7 @@ package com.ccr.service.impl;
 import com.ccr.constant.CcrConstants;
 import com.ccr.model.StreamContext;
 import com.ccr.service.TransformerService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -32,9 +33,9 @@ public class TransformerServiceImpl implements TransformerService {
     @Override
     public String transformOpenAiToAnthropic(String body) {
         try {
-            JsonNode root = objectMapper.readTree(body);
-            if (!(root instanceof ObjectNode)) return body;
-            ObjectNode openAiRequest = (ObjectNode) root;
+            JsonNode rootNode = objectMapper.readTree(body);
+            if (!(rootNode instanceof ObjectNode)) return body;
+            ObjectNode openAiRequest = (ObjectNode) rootNode;
 
             ObjectNode anthropicRequest = objectMapper.createObjectNode();
             anthropicRequest.set(CcrConstants.FIELD_MODEL, openAiRequest.get(CcrConstants.FIELD_MODEL));
@@ -48,7 +49,7 @@ public class TransformerServiceImpl implements TransformerService {
             } else if (openAiRequest.has("max_completion_tokens")) {
                 anthropicRequest.set(CcrConstants.FIELD_MAX_TOKENS, openAiRequest.get("max_completion_tokens"));
             } else {
-                // Anthropic requires max_tokens
+                // Anthropic 协议必须包含 max_tokens 字段
                 anthropicRequest.put(CcrConstants.FIELD_MAX_TOKENS, 4096);
             }
             
@@ -97,8 +98,11 @@ public class TransformerServiceImpl implements TransformerService {
             anthropicRequest.set(CcrConstants.FIELD_MESSAGES, anthropicMessages);
             
             return anthropicRequest.toString();
+        } catch (JsonProcessingException e) {
+            log.error("OpenAI 转 Anthropic 请求体解析失败: {}", e.getMessage());
+            return body;
         } catch (Exception e) {
-            log.error("Failed to transform OpenAI to Anthropic: {}", e.getMessage());
+            log.error("OpenAI 转 Anthropic 请求体转换发生未知错误: {}", e.getMessage());
             return body;
         }
     }
@@ -110,30 +114,30 @@ public class TransformerServiceImpl implements TransformerService {
     @Override
     public String transformAnthropicToOpenAi(String body) {
         try {
-            JsonNode root = objectMapper.readTree(body);
-            if (!(root instanceof ObjectNode)) return body;
-            ObjectNode antRequest = (ObjectNode) root;
+            JsonNode rootNode = objectMapper.readTree(body);
+            if (!(rootNode instanceof ObjectNode)) return body;
+            ObjectNode anthropicRequestNode = (ObjectNode) rootNode;
 
             ObjectNode openAiRequest = objectMapper.createObjectNode();
-            openAiRequest.set(CcrConstants.FIELD_MODEL, antRequest.get(CcrConstants.FIELD_MODEL));
+            openAiRequest.set(CcrConstants.FIELD_MODEL, anthropicRequestNode.get(CcrConstants.FIELD_MODEL));
             
-            if (antRequest.has(CcrConstants.FIELD_STREAM)) {
-                openAiRequest.set(CcrConstants.FIELD_STREAM, antRequest.get(CcrConstants.FIELD_STREAM));
+            if (anthropicRequestNode.has(CcrConstants.FIELD_STREAM)) {
+                openAiRequest.set(CcrConstants.FIELD_STREAM, anthropicRequestNode.get(CcrConstants.FIELD_STREAM));
             }
             
-            if (antRequest.has(CcrConstants.FIELD_MAX_TOKENS)) {
-                openAiRequest.set(CcrConstants.FIELD_MAX_TOKENS, antRequest.get(CcrConstants.FIELD_MAX_TOKENS));
+            if (anthropicRequestNode.has(CcrConstants.FIELD_MAX_TOKENS)) {
+                openAiRequest.set(CcrConstants.FIELD_MAX_TOKENS, anthropicRequestNode.get(CcrConstants.FIELD_MAX_TOKENS));
             }
             
-            if (antRequest.has(CcrConstants.FIELD_TEMPERATURE)) {
-                openAiRequest.set(CcrConstants.FIELD_TEMPERATURE, antRequest.get(CcrConstants.FIELD_TEMPERATURE));
+            if (anthropicRequestNode.has(CcrConstants.FIELD_TEMPERATURE)) {
+                openAiRequest.set(CcrConstants.FIELD_TEMPERATURE, anthropicRequestNode.get(CcrConstants.FIELD_TEMPERATURE));
             }
 
-            ArrayNode openAiMessages = objectMapper.createArrayNode();
+            ArrayNode openAiMessagesArray = objectMapper.createArrayNode();
             
-            // 1. Add system prompt as first message if exists
-            if (antRequest.has(CcrConstants.FIELD_SYSTEM)) {
-                JsonNode system = antRequest.get(CcrConstants.FIELD_SYSTEM);
+            // 1. 如果存在 system prompt，将其作为第一条消息添加
+            if (anthropicRequestNode.has(CcrConstants.FIELD_SYSTEM)) {
+                JsonNode system = anthropicRequestNode.get(CcrConstants.FIELD_SYSTEM);
                 ObjectNode sysMsg = objectMapper.createObjectNode();
                 sysMsg.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_SYSTEM);
                 
@@ -142,23 +146,23 @@ public class TransformerServiceImpl implements TransformerService {
                 } else if (system.isArray()) {
                     // Anthropic 允许 system 是数组，转为 OpenAI 字符串或保持数组（如果 OpenAI 支持）
                     // 为了兼容性，转为字符串
-                    StringBuilder sb = new StringBuilder();
+                    StringBuilder stringBuilder = new StringBuilder();
                     for (JsonNode node : system) {
                         if (node.has(CcrConstants.FIELD_TEXT)) {
-                            sb.append(node.get(CcrConstants.FIELD_TEXT).asText());
+                            stringBuilder.append(node.get(CcrConstants.FIELD_TEXT).asText());
                         }
                     }
-                    sysMsg.put(CcrConstants.FIELD_CONTENT, sb.toString());
+                    sysMsg.put(CcrConstants.FIELD_CONTENT, stringBuilder.toString());
                 } else {
                     sysMsg.set(CcrConstants.FIELD_CONTENT, system);
                 }
-                openAiMessages.add(sysMsg);
+                openAiMessagesArray.add(sysMsg);
             }
 
-            // 2. Add other messages and handle tool_result to tool role
-            if (antRequest.has(CcrConstants.FIELD_MESSAGES)) {
-                ArrayNode antMessages = (ArrayNode) antRequest.get(CcrConstants.FIELD_MESSAGES);
-                for (JsonNode msg : antMessages) {
+            // 2. 添加其他消息，并将 tool_result 角色转换为 OpenAI 的 tool 角色
+            if (anthropicRequestNode.has(CcrConstants.FIELD_MESSAGES)) {
+                ArrayNode anthropicMessages = (ArrayNode) anthropicRequestNode.get(CcrConstants.FIELD_MESSAGES);
+                for (JsonNode msg : anthropicMessages) {
                     if (msg.isObject()) {
                         ObjectNode msgObj = (ObjectNode) msg;
                         JsonNode content = msgObj.get(CcrConstants.FIELD_CONTENT);
@@ -182,7 +186,7 @@ public class TransformerServiceImpl implements TransformerService {
                                             toolMsg.put(CcrConstants.FIELD_CONTENT, toolContent.toString());
                                         }
                                     }
-                                    openAiMessages.add(toolMsg);
+                                    openAiMessagesArray.add(toolMsg);
                                 }
                             }
                             
@@ -218,7 +222,7 @@ public class TransformerServiceImpl implements TransformerService {
                                         assistantMsg.putNull(CcrConstants.FIELD_CONTENT);
                                     }
                                     assistantMsg.set(CcrConstants.FIELD_TOOL_CALLS, toolCalls);
-                                    openAiMessages.add(assistantMsg);
+                                    openAiMessagesArray.add(assistantMsg);
                                     continue; // 已处理
                                 }
                             }
@@ -226,17 +230,17 @@ public class TransformerServiceImpl implements TransformerService {
                             if (hasToolResult) continue; // 已作为 tool role 添加
                         }
                     }
-                    openAiMessages.add(msg.deepCopy());
+                    openAiMessagesArray.add(msg.deepCopy());
                 }
             }
             
-            openAiRequest.set(CcrConstants.FIELD_MESSAGES, openAiMessages);
+            openAiRequest.set(CcrConstants.FIELD_MESSAGES, openAiMessagesArray);
 
-            // 3. Handle Tools
-            if (antRequest.has(CcrConstants.FIELD_TOOLS)) {
-                ArrayNode antTools = (ArrayNode) antRequest.get(CcrConstants.FIELD_TOOLS);
+            // 3. 处理工具定义 (Tools)
+            if (anthropicRequestNode.has(CcrConstants.FIELD_TOOLS)) {
+                ArrayNode anthropicTools = (ArrayNode) anthropicRequestNode.get(CcrConstants.FIELD_TOOLS);
                 ArrayNode openAiTools = objectMapper.createArrayNode();
-                for (JsonNode antTool : antTools) {
+                for (JsonNode antTool : anthropicTools) {
                     ObjectNode openAiTool = objectMapper.createObjectNode();
                     openAiTool.put(CcrConstants.FIELD_TYPE, "function");
                     ObjectNode function = objectMapper.createObjectNode();
@@ -249,29 +253,32 @@ public class TransformerServiceImpl implements TransformerService {
                 openAiRequest.set(CcrConstants.FIELD_TOOLS, openAiTools);
             }
 
-            // 4. Handle Tool Choice
-            if (antRequest.has("tool_choice")) {
-                JsonNode antToolChoice = antRequest.get("tool_choice");
-                if (antToolChoice.isObject()) {
-                    String type = antToolChoice.path(CcrConstants.FIELD_TYPE).asText();
+            // 4. 处理工具选择策略 (Tool Choice)
+            if (anthropicRequestNode.has("tool_choice")) {
+                JsonNode anthropicToolChoice = anthropicRequestNode.get("tool_choice");
+                if (anthropicToolChoice.isObject()) {
+                    String type = anthropicToolChoice.path(CcrConstants.FIELD_TYPE).asText();
                     if ("tool".equals(type)) {
                         ObjectNode openAiToolChoice = objectMapper.createObjectNode();
                         openAiToolChoice.put(CcrConstants.FIELD_TYPE, "function");
                         ObjectNode function = objectMapper.createObjectNode();
-                        function.set("name", antToolChoice.get("name"));
+                        function.set("name", anthropicToolChoice.get("name"));
                         openAiToolChoice.set("function", function);
                         openAiRequest.set("tool_choice", openAiToolChoice);
                     } else {
                         openAiRequest.put("tool_choice", type);
                     }
                 } else {
-                    openAiRequest.set("tool_choice", antToolChoice);
+                    openAiRequest.set("tool_choice", anthropicToolChoice);
                 }
             }
             
             return openAiRequest.toString();
+        } catch (JsonProcessingException e) {
+            log.error("Anthropic 转 OpenAI 请求体解析失败: {}", e.getMessage());
+            return body;
         } catch (Exception e) {
-            log.error("Failed to transform Anthropic to OpenAI: {}", e.getMessage());
+            log.error("Anthropic 转 OpenAI 请求体转换发生未知错误: {}", e.getMessage());
             return body;
         }
     }
@@ -283,15 +290,15 @@ public class TransformerServiceImpl implements TransformerService {
     @Override
     public String transformOpenAiResponseToAnthropic(String body) {
         try {
-            JsonNode root = objectMapper.readTree(body);
-            ObjectNode antResp = objectMapper.createObjectNode();
+            JsonNode rootNode = objectMapper.readTree(body);
+            ObjectNode anthropicResponseNode = objectMapper.createObjectNode();
             
-            antResp.put(CcrConstants.FIELD_ID, root.has(CcrConstants.FIELD_ID) ? root.get(CcrConstants.FIELD_ID).asText() : "ant-" + UUID.randomUUID());
-            antResp.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_MESSAGE);
-            antResp.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_ASSISTANT);
-            antResp.put(CcrConstants.FIELD_MODEL, root.has(CcrConstants.FIELD_MODEL) ? root.get(CcrConstants.FIELD_MODEL).asText() : "unknown");
+            anthropicResponseNode.put(CcrConstants.FIELD_ID, rootNode.has(CcrConstants.FIELD_ID) ? rootNode.get(CcrConstants.FIELD_ID).asText() : "ant-" + UUID.randomUUID());
+            anthropicResponseNode.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_MESSAGE);
+            anthropicResponseNode.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_ASSISTANT);
+            anthropicResponseNode.put(CcrConstants.FIELD_MODEL, rootNode.has(CcrConstants.FIELD_MODEL) ? rootNode.get(CcrConstants.FIELD_MODEL).asText() : "unknown");
 
-            ArrayNode choices = (ArrayNode) root.get(CcrConstants.OPENAI_CHOICES);
+            ArrayNode choices = (ArrayNode) rootNode.get(CcrConstants.OPENAI_CHOICES);
             ArrayNode contentArray = objectMapper.createArrayNode();
             if (choices != null && choices.size() > 0) {
                 JsonNode firstChoice = choices.get(0);
@@ -345,7 +352,10 @@ public class TransformerServiceImpl implements TransformerService {
                         toolUseObj.put("name", function.get("name").asText());
                         try {
                             toolUseObj.set("input", objectMapper.readTree(function.get("arguments").asText()));
+                        } catch (JsonProcessingException e) {
+                            toolUseObj.put("input", function.get("arguments").asText());
                         } catch (Exception e) {
+                            log.warn("解析工具调用参数失败: {}", e.getMessage());
                             toolUseObj.put("input", function.get("arguments").asText());
                         }
                         contentArray.add(toolUseObj);
@@ -353,14 +363,14 @@ public class TransformerServiceImpl implements TransformerService {
                 }
                 
                 String finishReason = firstChoice.has(CcrConstants.OPENAI_FINISH_REASON) ? firstChoice.get(CcrConstants.OPENAI_FINISH_REASON).asText() : null;
-                antResp.put(CcrConstants.FIELD_STOP_REASON, mapOpenAiFinishReasonToAnthropic(finishReason));
-                antResp.putNull(CcrConstants.FIELD_STOP_SEQUENCE);
+                anthropicResponseNode.put(CcrConstants.FIELD_STOP_REASON, mapOpenAiFinishReasonToAnthropic(finishReason));
+                anthropicResponseNode.putNull(CcrConstants.FIELD_STOP_SEQUENCE);
             }
-            antResp.set(CcrConstants.FIELD_CONTENT, contentArray);
+            anthropicResponseNode.set(CcrConstants.FIELD_CONTENT, contentArray);
 
-            if (root.has(CcrConstants.FIELD_USAGE)) {
+            if (rootNode.has(CcrConstants.FIELD_USAGE)) {
                 ObjectNode usage = objectMapper.createObjectNode();
-                JsonNode openAiUsage = root.get(CcrConstants.FIELD_USAGE);
+                JsonNode openAiUsage = rootNode.get(CcrConstants.FIELD_USAGE);
                 usage.put(CcrConstants.FIELD_INPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_PROMPT_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_PROMPT_TOKENS).asInt() : 0);
                 usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0);
                 
@@ -372,18 +382,21 @@ public class TransformerServiceImpl implements TransformerService {
                     usage.put(CcrConstants.FIELD_INPUT_TOKENS, Math.max(0, usage.get(CcrConstants.FIELD_INPUT_TOKENS).asInt() - cached));
                 }
                 
-                antResp.set(CcrConstants.FIELD_USAGE, usage);
+                anthropicResponseNode.set(CcrConstants.FIELD_USAGE, usage);
             } else {
-                // Anthropic requires usage field
+                // Anthropic 协议要求必须有 usage 字段
                 ObjectNode usage = objectMapper.createObjectNode();
                 usage.put(CcrConstants.FIELD_INPUT_TOKENS, 0);
                 usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
-                antResp.set(CcrConstants.FIELD_USAGE, usage);
+                anthropicResponseNode.set(CcrConstants.FIELD_USAGE, usage);
             }
 
-            return antResp.toString();
+            return anthropicResponseNode.toString();
+        } catch (JsonProcessingException e) {
+            log.error("OpenAI 响应转 Anthropic 解析失败: {}", e.getMessage());
+            return body;
         } catch (Exception e) {
-            log.error("Failed to transform OpenAI response to Anthropic: {}", e.getMessage());
+            log.error("OpenAI 响应转 Anthropic 转换发生未知错误: {}", e.getMessage());
             return body;
         }
     }
@@ -414,12 +427,12 @@ public class TransformerServiceImpl implements TransformerService {
             String finishReason = firstChoice.has(CcrConstants.OPENAI_FINISH_REASON) && !firstChoice.get(CcrConstants.OPENAI_FINISH_REASON).isNull() 
                     ? firstChoice.get(CcrConstants.OPENAI_FINISH_REASON).asText() : null;
 
-            StringBuilder sb = new StringBuilder();
+            StringBuilder outputBuilder = new StringBuilder();
 
             // 1. 发送 message_start (如果尚未发送)
             if (!context.isMessageStarted()) {
-                ObjectNode start = objectMapper.createObjectNode();
-                start.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_START);
+                ObjectNode messageStart = objectMapper.createObjectNode();
+                messageStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_START);
                 ObjectNode message = objectMapper.createObjectNode();
                 message.put(CcrConstants.FIELD_ID, root.has(CcrConstants.FIELD_ID) ? root.get(CcrConstants.FIELD_ID).asText() : "ant-" + UUID.randomUUID());
                 message.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_MESSAGE);
@@ -436,8 +449,8 @@ public class TransformerServiceImpl implements TransformerService {
                 usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
                 message.set(CcrConstants.FIELD_USAGE, usage);
                 
-                start.set(CcrConstants.FIELD_MESSAGE, message);
-                sb.append(CcrConstants.SSE_DATA_PREFIX).append(start.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                messageStart.set(CcrConstants.FIELD_MESSAGE, message);
+                outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(messageStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                 context.setMessageStarted(true);
             }
 
@@ -447,33 +460,33 @@ public class TransformerServiceImpl implements TransformerService {
                     String thinkingContent = delta.get(CcrConstants.FIELD_REASONING_CONTENT).asText();
                     if (!thinkingContent.isEmpty()) {
                         if (!context.isThinkingStarted()) {
-                            // content_block_start for thinking
+                            // 发送思维链块的开始事件 (content_block_start)
                             int blockIndex = context.getNextBlockIndex();
                             context.setThinkingBlockIndex(blockIndex);
                             context.setNextBlockIndex(blockIndex + 1);
                             
-                            ObjectNode cbStart = objectMapper.createObjectNode();
-                            cbStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
-                            cbStart.put(CcrConstants.FIELD_INDEX, blockIndex);
-                            ObjectNode cb = objectMapper.createObjectNode();
-                            cb.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_THINKING);
-                            cb.put(CcrConstants.FIELD_THINKING, "");
-                            cb.put("signature", "sign_" + UUID.randomUUID().toString().substring(0, 8));
-                            cbStart.set("content_block", cb);
-                            sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                            ObjectNode contentBlockStart = objectMapper.createObjectNode();
+                            contentBlockStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
+                            contentBlockStart.put(CcrConstants.FIELD_INDEX, blockIndex);
+                            ObjectNode contentBlock = objectMapper.createObjectNode();
+                            contentBlock.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_THINKING);
+                            contentBlock.put(CcrConstants.FIELD_THINKING, "");
+                            contentBlock.put("signature", "sign_" + UUID.randomUUID().toString().substring(0, 8));
+                            contentBlockStart.set("content_block", contentBlock);
+                            outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                             context.setThinkingStarted(true);
                             context.setCurrentBlockIndex(blockIndex);
                         }
                         
                         // content_block_delta
-                        ObjectNode cbDelta = objectMapper.createObjectNode();
-                        cbDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
-                        cbDelta.put(CcrConstants.FIELD_INDEX, context.getThinkingBlockIndex());
-                        ObjectNode d = objectMapper.createObjectNode();
-                        d.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_THINKING_DELTA);
-                        d.put(CcrConstants.FIELD_THINKING, thinkingContent);
-                        cbDelta.set(CcrConstants.FIELD_DELTA, d);
-                        sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                        ObjectNode contentBlockDelta = objectMapper.createObjectNode();
+                        contentBlockDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
+                        contentBlockDelta.put(CcrConstants.FIELD_INDEX, context.getThinkingBlockIndex());
+                        ObjectNode deltaNode = objectMapper.createObjectNode();
+                        deltaNode.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_THINKING_DELTA);
+                        deltaNode.put(CcrConstants.FIELD_THINKING, thinkingContent);
+                        contentBlockDelta.set(CcrConstants.FIELD_DELTA, deltaNode);
+                        outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                     }
                 }
 
@@ -483,41 +496,41 @@ public class TransformerServiceImpl implements TransformerService {
                     if (!content.isEmpty()) {
                         // 如果之前在做 Thinking 或 Tool Call，现在转 Text，需要发 Stop
                         if (context.isThinkingStarted() || (context.getCurrentBlockIndex() != -1 && !context.isTextStarted())) {
-                            ObjectNode cbStop = objectMapper.createObjectNode();
-                            cbStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
-                            cbStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
-                            sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                            ObjectNode contentBlockStop = objectMapper.createObjectNode();
+                            contentBlockStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
+                            contentBlockStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
+                            outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                             context.setThinkingStarted(false);
                             context.setCurrentBlockIndex(-1);
                         }
                         
                         if (!context.isTextStarted()) {
-                            // content_block_start for text
+                            // 发送文本块的开始事件 (content_block_start)
                             int blockIndex = context.getNextBlockIndex();
                             context.setTextBlockIndex(blockIndex);
                             context.setNextBlockIndex(blockIndex + 1);
                             
-                            ObjectNode cbStart = objectMapper.createObjectNode();
-                            cbStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
-                            cbStart.put(CcrConstants.FIELD_INDEX, blockIndex);
-                            ObjectNode cb = objectMapper.createObjectNode();
-                            cb.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_TEXT);
-                            cb.put(CcrConstants.FIELD_TEXT, "");
-                            cbStart.set("content_block", cb);
-                            sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                            ObjectNode contentBlockStart = objectMapper.createObjectNode();
+                            contentBlockStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
+                            contentBlockStart.put(CcrConstants.FIELD_INDEX, blockIndex);
+                            ObjectNode contentBlock = objectMapper.createObjectNode();
+                            contentBlock.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_TEXT);
+                            contentBlock.put(CcrConstants.FIELD_TEXT, "");
+                            contentBlockStart.set("content_block", contentBlock);
+                            outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                             context.setTextStarted(true);
                             context.setCurrentBlockIndex(blockIndex);
                         }
                         
                         // content_block_delta
-                        ObjectNode cbDelta = objectMapper.createObjectNode();
-                        cbDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
-                        cbDelta.put(CcrConstants.FIELD_INDEX, context.getTextBlockIndex());
-                        ObjectNode d = objectMapper.createObjectNode();
-                        d.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TEXT_DELTA);
-                        d.put(CcrConstants.FIELD_TEXT, content);
-                        cbDelta.set(CcrConstants.FIELD_DELTA, d);
-                        sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                        ObjectNode contentBlockDelta = objectMapper.createObjectNode();
+                        contentBlockDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
+                        contentBlockDelta.put(CcrConstants.FIELD_INDEX, context.getTextBlockIndex());
+                        ObjectNode deltaNode = objectMapper.createObjectNode();
+                        deltaNode.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TEXT_DELTA);
+                        deltaNode.put(CcrConstants.FIELD_TEXT, content);
+                        contentBlockDelta.set(CcrConstants.FIELD_DELTA, deltaNode);
+                        outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                     }
                 }
 
@@ -529,13 +542,13 @@ public class TransformerServiceImpl implements TransformerService {
                         int toolCallIndex = toolCall.has(CcrConstants.FIELD_INDEX) ? toolCall.get(CcrConstants.FIELD_INDEX).asInt() : 0;
                         
                         if (!context.getToolCallIndexToContentBlockIndex().containsKey(toolCallIndex)) {
-                            // 这是一个新的工具调用
-                            // 如果之前在做 Thinking 或 Text 或其他 Tool Call，发送 Stop
+                            // 这是一个新的工具调用块
+                            // 如果之前有活跃的思维链或文本块，先发送 Stop 事件
                             if (context.getCurrentBlockIndex() != -1) {
-                                ObjectNode cbStop = objectMapper.createObjectNode();
-                                cbStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
-                                cbStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
-                                sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                                ObjectNode contentBlockStop = objectMapper.createObjectNode();
+                                contentBlockStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
+                                contentBlockStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
+                                outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                                 context.setThinkingStarted(false);
                                 context.setTextStarted(false);
                                 context.setCurrentBlockIndex(-1);
@@ -546,16 +559,16 @@ public class TransformerServiceImpl implements TransformerService {
                             context.getToolCallIndexToContentBlockIndex().put(toolCallIndex, blockIndex);
                             
                             // content_block_start
-                            ObjectNode cbStart = objectMapper.createObjectNode();
-                            cbStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
-                            cbStart.put(CcrConstants.FIELD_INDEX, blockIndex);
-                            ObjectNode cb = objectMapper.createObjectNode();
-                            cb.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TOOL_USE);
-                            cb.put(CcrConstants.FIELD_ID, toolCall.has(CcrConstants.FIELD_ID) ? toolCall.get(CcrConstants.FIELD_ID).asText() : "toolu_" + UUID.randomUUID().toString().substring(0, 8));
-                            cb.put("name", toolCall.has("function") && toolCall.get("function").has("name") ? toolCall.get("function").get("name").asText() : "unknown");
-                            cb.set("input", objectMapper.createObjectNode());
-                            cbStart.set("content_block", cb);
-                            sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                            ObjectNode contentBlockStart = objectMapper.createObjectNode();
+                            contentBlockStart.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_START);
+                            contentBlockStart.put(CcrConstants.FIELD_INDEX, blockIndex);
+                            ObjectNode contentBlock = objectMapper.createObjectNode();
+                            contentBlock.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_TOOL_USE);
+                            contentBlock.put(CcrConstants.FIELD_ID, toolCall.has(CcrConstants.FIELD_ID) ? toolCall.get(CcrConstants.FIELD_ID).asText() : "toolu_" + UUID.randomUUID().toString().substring(0, 8));
+                            contentBlock.put("name", toolCall.has("function") && toolCall.get("function").has("name") ? toolCall.get("function").get("name").asText() : "unknown");
+                            contentBlock.set("input", objectMapper.createObjectNode());
+                            contentBlockStart.set("content_block", contentBlock);
+                            outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStart.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                             context.setCurrentBlockIndex(blockIndex);
                         }
                         
@@ -564,14 +577,14 @@ public class TransformerServiceImpl implements TransformerService {
                             if (!arguments.isEmpty()) {
                                 // content_block_delta
                                 int blockIndex = context.getToolCallIndexToContentBlockIndex().get(toolCallIndex);
-                                ObjectNode cbDelta = objectMapper.createObjectNode();
-                                cbDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
-                                cbDelta.put(CcrConstants.FIELD_INDEX, blockIndex);
-                                ObjectNode d = objectMapper.createObjectNode();
-                                d.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_INPUT_JSON_DELTA);
-                                d.put("partial_json", arguments);
-                                cbDelta.set(CcrConstants.FIELD_DELTA, d);
-                                sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                                ObjectNode contentBlockDelta = objectMapper.createObjectNode();
+                                contentBlockDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA);
+                                contentBlockDelta.put(CcrConstants.FIELD_INDEX, blockIndex);
+                                ObjectNode deltaNode = objectMapper.createObjectNode();
+                                deltaNode.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_TYPE_INPUT_JSON_DELTA);
+                                deltaNode.put("partial_json", arguments);
+                                contentBlockDelta.set(CcrConstants.FIELD_DELTA, deltaNode);
+                                outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                                 context.setCurrentBlockIndex(blockIndex);
                             }
                         }
@@ -583,22 +596,22 @@ public class TransformerServiceImpl implements TransformerService {
             if (finishReason != null || root.has(CcrConstants.FIELD_USAGE)) {
                 // 如果块还在运行，先发 Stop
                 if (context.getCurrentBlockIndex() != -1) {
-                    ObjectNode cbStop = objectMapper.createObjectNode();
-                    cbStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
-                    cbStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
-                    sb.append(CcrConstants.SSE_DATA_PREFIX).append(cbStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                    ObjectNode contentBlockStop = objectMapper.createObjectNode();
+                    contentBlockStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_CONTENT_BLOCK_STOP);
+                    contentBlockStop.put(CcrConstants.FIELD_INDEX, context.getCurrentBlockIndex());
+                    outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(contentBlockStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                     context.setThinkingStarted(false);
                     context.setTextStarted(false);
                     context.setCurrentBlockIndex(-1);
                 }
 
                 // message_delta
-                ObjectNode end = objectMapper.createObjectNode();
-                end.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_DELTA);
-                ObjectNode d = objectMapper.createObjectNode();
-                d.put(CcrConstants.FIELD_STOP_REASON, mapOpenAiFinishReasonToAnthropic(finishReason));
-                d.putNull("stop_sequence");
-                end.set(CcrConstants.FIELD_DELTA, d);
+                ObjectNode messageDelta = objectMapper.createObjectNode();
+                messageDelta.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_DELTA);
+                ObjectNode deltaNode = objectMapper.createObjectNode();
+                deltaNode.put(CcrConstants.FIELD_STOP_REASON, mapOpenAiFinishReasonToAnthropic(finishReason));
+                deltaNode.putNull("stop_sequence");
+                messageDelta.set(CcrConstants.FIELD_DELTA, deltaNode);
 
                 // Usage
                 ObjectNode usage = objectMapper.createObjectNode();
@@ -618,18 +631,21 @@ public class TransformerServiceImpl implements TransformerService {
                     usage.put(CcrConstants.FIELD_OUTPUT_TOKENS, 0);
                     usage.put(CcrConstants.FIELD_CACHE_READ_INPUT_TOKENS, 0);
                 }
-                end.set(CcrConstants.FIELD_USAGE, usage);
-                sb.append(CcrConstants.SSE_DATA_PREFIX).append(end.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                messageDelta.set(CcrConstants.FIELD_USAGE, usage);
+                outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(messageDelta.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
                 
                 // message_stop
-                ObjectNode stop = objectMapper.createObjectNode();
-                stop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_STOP);
-                sb.append(CcrConstants.SSE_DATA_PREFIX).append(stop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
+                ObjectNode messageStop = objectMapper.createObjectNode();
+                messageStop.put(CcrConstants.FIELD_TYPE, CcrConstants.ANT_EVENT_MESSAGE_STOP);
+                outputBuilder.append(CcrConstants.SSE_DATA_PREFIX).append(messageStop.toString()).append(CcrConstants.SSE_LINE_SEPARATOR);
             }
 
-            return sb.length() > 0 ? sb.toString() : null;
+            return outputBuilder.length() > 0 ? outputBuilder.toString() : null;
+        } catch (JsonProcessingException e) {
+            log.error("OpenAI SSE 转 Anthropic 解析失败: {}", e.getMessage());
+            return null;
         } catch (Exception e) {
-            log.error("Failed to transform OpenAI SSE to Anthropic: {}", e.getMessage());
+            log.error("OpenAI SSE 转 Anthropic 转换发生未知错误: {}", e.getMessage());
             return null;
         }
     }
@@ -641,13 +657,13 @@ public class TransformerServiceImpl implements TransformerService {
     @Override
     public String transformAnthropicResponseToOpenAi(String body) {
         try {
-            JsonNode root = objectMapper.readTree(body);
-            ObjectNode openAiResp = objectMapper.createObjectNode();
+            JsonNode rootNode = objectMapper.readTree(body);
+            ObjectNode openAiResponseNode = objectMapper.createObjectNode();
             
-            openAiResp.put(CcrConstants.FIELD_ID, root.has(CcrConstants.FIELD_ID) ? root.get(CcrConstants.FIELD_ID).asText() : "chatcmpl-" + UUID.randomUUID());
-            openAiResp.put(CcrConstants.FIELD_OBJECT, CcrConstants.OPENAI_OBJECT_CHAT_COMPLETION);
-            openAiResp.put(CcrConstants.FIELD_CREATED, System.currentTimeMillis() / 1000);
-            openAiResp.put(CcrConstants.FIELD_MODEL, root.has(CcrConstants.FIELD_MODEL) ? root.get(CcrConstants.FIELD_MODEL).asText() : "unknown");
+            openAiResponseNode.put(CcrConstants.FIELD_ID, rootNode.has(CcrConstants.FIELD_ID) ? rootNode.get(CcrConstants.FIELD_ID).asText() : "chatcmpl-" + UUID.randomUUID());
+            openAiResponseNode.put(CcrConstants.FIELD_OBJECT, CcrConstants.OPENAI_OBJECT_CHAT_COMPLETION);
+            openAiResponseNode.put(CcrConstants.FIELD_CREATED, System.currentTimeMillis() / 1000);
+            openAiResponseNode.put(CcrConstants.FIELD_MODEL, rootNode.has(CcrConstants.FIELD_MODEL) ? rootNode.get(CcrConstants.FIELD_MODEL).asText() : "unknown");
 
             ArrayNode choices = objectMapper.createArrayNode();
             ObjectNode choice = objectMapper.createObjectNode();
@@ -656,7 +672,7 @@ public class TransformerServiceImpl implements TransformerService {
             ObjectNode message = objectMapper.createObjectNode();
             message.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_ASSISTANT);
             
-            JsonNode contentNode = root.get(CcrConstants.FIELD_CONTENT);
+            JsonNode contentNode = rootNode.get(CcrConstants.FIELD_CONTENT);
             if (contentNode != null && contentNode.isArray()) {
                 StringBuilder contentText = new StringBuilder();
                 for (JsonNode block : contentNode) {
@@ -688,11 +704,11 @@ public class TransformerServiceImpl implements TransformerService {
             choice.set(CcrConstants.FIELD_MESSAGE, message);
             choice.put(CcrConstants.OPENAI_FINISH_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP);
             choices.add(choice);
-            openAiResp.set(CcrConstants.FIELD_CHOICES, choices);
+            openAiResponseNode.set(CcrConstants.FIELD_CHOICES, choices);
 
-            if (root.has(CcrConstants.FIELD_USAGE)) {
+            if (rootNode.has(CcrConstants.FIELD_USAGE)) {
                 ObjectNode usage = objectMapper.createObjectNode();
-                JsonNode antUsage = root.get(CcrConstants.FIELD_USAGE);
+                JsonNode antUsage = rootNode.get(CcrConstants.FIELD_USAGE);
                 int inputTokens = antUsage.has(CcrConstants.FIELD_INPUT_TOKENS) ? antUsage.get(CcrConstants.FIELD_INPUT_TOKENS).asInt() : 0;
                 int outputTokens = antUsage.has(CcrConstants.FIELD_OUTPUT_TOKENS) ? antUsage.get(CcrConstants.FIELD_OUTPUT_TOKENS).asInt() : 0;
                 int cachedTokens = antUsage.has(CcrConstants.FIELD_CACHE_READ_INPUT_TOKENS) ? antUsage.get(CcrConstants.FIELD_CACHE_READ_INPUT_TOKENS).asInt() : 0;
@@ -707,12 +723,15 @@ public class TransformerServiceImpl implements TransformerService {
                     usage.set("prompt_tokens_details", details);
                 }
                 
-                openAiResp.set(CcrConstants.FIELD_USAGE, usage);
+                openAiResponseNode.set(CcrConstants.FIELD_USAGE, usage);
             }
 
-            return openAiResp.toString();
+            return openAiResponseNode.toString();
+        } catch (JsonProcessingException e) {
+            log.error("Anthropic 响应转 OpenAI 解析失败: {}", e.getMessage());
+            return body;
         } catch (Exception e) {
-            log.error("Failed to transform Anthropic response to OpenAI: {}", e.getMessage());
+            log.error("Anthropic 响应转 OpenAI 转换发生未知错误: {}", e.getMessage());
             return body;
         }
     }
@@ -729,8 +748,8 @@ public class TransformerServiceImpl implements TransformerService {
         if (CcrConstants.SSE_DONE.equals(data)) return line;
 
         try {
-            JsonNode root = objectMapper.readTree(data);
-            String type = root.has(CcrConstants.FIELD_TYPE) ? root.get(CcrConstants.FIELD_TYPE).asText() : "";
+            JsonNode rootNode = objectMapper.readTree(data);
+            String type = rootNode.has(CcrConstants.FIELD_TYPE) ? rootNode.get(CcrConstants.FIELD_TYPE).asText() : "";
             
             if (CcrConstants.ANT_EVENT_MESSAGE_STOP.equals(type)) {
                 return CcrConstants.SSE_DATA_PREFIX + CcrConstants.SSE_DONE + CcrConstants.SSE_LINE_SEPARATOR;
@@ -749,12 +768,12 @@ public class TransformerServiceImpl implements TransformerService {
             boolean shouldSend = false;
             if (CcrConstants.ANT_EVENT_MESSAGE_START.equals(type)) {
                 delta.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_ASSISTANT);
-                if (root.has(CcrConstants.FIELD_MESSAGE) && root.get(CcrConstants.FIELD_MESSAGE).has(CcrConstants.FIELD_MODEL)) {
-                    openAiChunk.put(CcrConstants.FIELD_MODEL, root.get(CcrConstants.FIELD_MESSAGE).get(CcrConstants.FIELD_MODEL).asText());
+                if (rootNode.has(CcrConstants.FIELD_MESSAGE) && rootNode.get(CcrConstants.FIELD_MESSAGE).has(CcrConstants.FIELD_MODEL)) {
+                    openAiChunk.put(CcrConstants.FIELD_MODEL, rootNode.get(CcrConstants.FIELD_MESSAGE).get(CcrConstants.FIELD_MODEL).asText());
                 }
                 shouldSend = true;
             } else if (CcrConstants.ANT_EVENT_CONTENT_BLOCK_DELTA.equals(type)) {
-                JsonNode antDelta = root.get(CcrConstants.FIELD_DELTA);
+                JsonNode antDelta = rootNode.get(CcrConstants.FIELD_DELTA);
                 String antDeltaType = antDelta.get(CcrConstants.FIELD_TYPE).asText();
                 
                 if (CcrConstants.ANT_TYPE_TEXT_DELTA.equals(antDeltaType)) {
@@ -764,10 +783,10 @@ public class TransformerServiceImpl implements TransformerService {
                     delta.put(CcrConstants.FIELD_REASONING_CONTENT, antDelta.get(CcrConstants.FIELD_THINKING).asText());
                     shouldSend = true;
                 } else if (CcrConstants.ANT_TYPE_INPUT_JSON_DELTA.equals(antDeltaType)) {
-                    // 工具调用增量处理
+                    // 工具调用增量处理（由于 Anthropic 索引偏移，通常减 2）
                     ArrayNode openAiToolCalls = objectMapper.createArrayNode();
                     ObjectNode openAiToolCall = objectMapper.createObjectNode();
-                    openAiToolCall.put(CcrConstants.FIELD_INDEX, root.get(CcrConstants.FIELD_INDEX).asInt() - 2); // 假设从 index 2 开始是工具
+                    openAiToolCall.put(CcrConstants.FIELD_INDEX, rootNode.get(CcrConstants.FIELD_INDEX).asInt() - 2);
                     ObjectNode function = objectMapper.createObjectNode();
                     function.put("arguments", antDelta.get("partial_json").asText());
                     openAiToolCall.set("function", function);
@@ -776,15 +795,15 @@ public class TransformerServiceImpl implements TransformerService {
                     shouldSend = true;
                 }
             } else if (CcrConstants.ANT_EVENT_MESSAGE_DELTA.equals(type)) {
-                JsonNode antDelta = root.get(CcrConstants.FIELD_DELTA);
+                JsonNode antDelta = rootNode.get(CcrConstants.FIELD_DELTA);
                 if (antDelta.has(CcrConstants.FIELD_STOP_REASON) && !antDelta.get(CcrConstants.FIELD_STOP_REASON).isNull()) {
                     choice.put(CcrConstants.OPENAI_FINISH_REASON, mapAnthropicStopReasonToOpenAi(antDelta.get(CcrConstants.FIELD_STOP_REASON).asText()));
                 } else {
                     choice.put(CcrConstants.OPENAI_FINISH_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP);
                 }
                 
-                if (root.has(CcrConstants.FIELD_USAGE)) {
-                    JsonNode antUsage = root.get(CcrConstants.FIELD_USAGE);
+                if (rootNode.has(CcrConstants.FIELD_USAGE)) {
+                    JsonNode antUsage = rootNode.get(CcrConstants.FIELD_USAGE);
                     ObjectNode openAiUsage = objectMapper.createObjectNode();
                     int input = antUsage.has(CcrConstants.FIELD_INPUT_TOKENS) ? antUsage.get(CcrConstants.FIELD_INPUT_TOKENS).asInt() : 0;
                     int output = antUsage.has(CcrConstants.FIELD_OUTPUT_TOKENS) ? antUsage.get(CcrConstants.FIELD_OUTPUT_TOKENS).asInt() : 0;
@@ -803,15 +822,15 @@ public class TransformerServiceImpl implements TransformerService {
                 }
                 shouldSend = true;
             } else if (CcrConstants.ANT_EVENT_CONTENT_BLOCK_START.equals(type)) {
-                JsonNode cb = root.get("content_block");
-                if (cb.has(CcrConstants.FIELD_TYPE) && CcrConstants.ANT_TYPE_TOOL_USE.equals(cb.get(CcrConstants.FIELD_TYPE).asText())) {
+                JsonNode contentBlockNode = rootNode.get("content_block");
+                if (contentBlockNode.has(CcrConstants.FIELD_TYPE) && CcrConstants.ANT_TYPE_TOOL_USE.equals(contentBlockNode.get(CcrConstants.FIELD_TYPE).asText())) {
                     ArrayNode openAiToolCalls = objectMapper.createArrayNode();
                     ObjectNode openAiToolCall = objectMapper.createObjectNode();
-                    openAiToolCall.put(CcrConstants.FIELD_INDEX, root.get(CcrConstants.FIELD_INDEX).asInt() - 2);
-                    openAiToolCall.put(CcrConstants.FIELD_ID, cb.get(CcrConstants.FIELD_ID).asText());
+                    openAiToolCall.put(CcrConstants.FIELD_INDEX, rootNode.get(CcrConstants.FIELD_INDEX).asInt() - 2);
+                    openAiToolCall.put(CcrConstants.FIELD_ID, contentBlockNode.get(CcrConstants.FIELD_ID).asText());
                     openAiToolCall.put(CcrConstants.FIELD_TYPE, "function");
                     ObjectNode function = objectMapper.createObjectNode();
-                    function.put("name", cb.get("name").asText());
+                    function.put("name", contentBlockNode.get("name").asText());
                     function.put("arguments", "");
                     openAiToolCall.set("function", function);
                     openAiToolCalls.add(openAiToolCall);
@@ -827,8 +846,11 @@ public class TransformerServiceImpl implements TransformerService {
             openAiChunk.set("choices", choices);
             
             return CcrConstants.SSE_DATA_PREFIX + openAiChunk.toString() + "\n\n";
+        } catch (JsonProcessingException e) {
+            log.error("Anthropic SSE 转 OpenAI 解析失败: {}", e.getMessage());
+            return line;
         } catch (Exception e) {
-            log.error("Failed to transform Anthropic SSE to OpenAI: {}", e.getMessage());
+            log.error("Anthropic SSE 转 OpenAI 转换发生未知错误: {}", e.getMessage());
             return line;
         }
     }
