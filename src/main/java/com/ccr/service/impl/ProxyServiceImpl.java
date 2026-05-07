@@ -97,9 +97,9 @@ public class ProxyServiceImpl implements ProxyService {
                 finalBody = rootNode.toString();
             }
         } catch (JsonProcessingException e) {
-            log.error("解析请求体更新模型名失败: {}", e.getMessage());
+            log.error("Failed to parse request body for updating model name: {}", e.getMessage());
         } catch (Exception e) {
-            log.error("更新模型名发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred during model name update: {}", e.getMessage());
         }
         log.info("Final transformed request body: {}", finalBody);
         return finalBody;
@@ -198,7 +198,7 @@ public class ProxyServiceImpl implements ProxyService {
                                         // 非 JSON 数据，尝试从原始 SSE 事件中获取类型
                                         eventType = sseEvent.event();
                                     } catch (Exception e) {
-                                        log.warn("解析 SSE 数据类型发生异常: {}", e.getMessage());
+                                        log.warn("Exception occurred while parsing SSE data type: {}", e.getMessage());
                                         eventType = sseEvent.event();
                                     }
 

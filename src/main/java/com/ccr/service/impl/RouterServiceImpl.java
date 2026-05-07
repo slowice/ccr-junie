@@ -56,10 +56,10 @@ public class RouterServiceImpl implements RouterService {
                 }
             }
         } catch (JsonProcessingException e) {
-            log.error("解析请求体失败，将使用默认路由: {}", e.getMessage());
+            log.error("Failed to parse request body, using default route: {}", e.getMessage());
             targetModelStr = ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
         } catch (Exception e) {
-            log.error("路由选择过程发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred during route selection: {}", e.getMessage());
             targetModelStr = ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
         }
 

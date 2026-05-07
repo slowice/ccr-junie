@@ -99,10 +99,10 @@ public class TransformerServiceImpl implements TransformerService {
             
             return anthropicRequest.toString();
         } catch (JsonProcessingException e) {
-            log.error("OpenAI 转 Anthropic 请求体解析失败: {}", e.getMessage());
+            log.error("Failed to parse request body when transforming OpenAI to Anthropic: {}", e.getMessage());
             return body;
         } catch (Exception e) {
-            log.error("OpenAI 转 Anthropic 请求体转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming OpenAI to Anthropic: {}", e.getMessage());
             return body;
         }
     }
@@ -275,10 +275,10 @@ public class TransformerServiceImpl implements TransformerService {
             
             return openAiRequest.toString();
         } catch (JsonProcessingException e) {
-            log.error("Anthropic 转 OpenAI 请求体解析失败: {}", e.getMessage());
+            log.error("Failed to parse request body when transforming Anthropic to OpenAI: {}", e.getMessage());
             return body;
         } catch (Exception e) {
-            log.error("Anthropic 转 OpenAI 请求体转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming Anthropic to OpenAI: {}", e.getMessage());
             return body;
         }
     }
@@ -355,7 +355,7 @@ public class TransformerServiceImpl implements TransformerService {
                         } catch (JsonProcessingException e) {
                             toolUseObj.put("input", function.get("arguments").asText());
                         } catch (Exception e) {
-                            log.warn("解析工具调用参数失败: {}", e.getMessage());
+                            log.warn("Failed to parse tool call arguments: {}", e.getMessage());
                             toolUseObj.put("input", function.get("arguments").asText());
                         }
                         contentArray.add(toolUseObj);
@@ -393,10 +393,10 @@ public class TransformerServiceImpl implements TransformerService {
 
             return anthropicResponseNode.toString();
         } catch (JsonProcessingException e) {
-            log.error("OpenAI 响应转 Anthropic 解析失败: {}", e.getMessage());
+            log.error("Failed to parse OpenAI response when transforming to Anthropic: {}", e.getMessage());
             return body;
         } catch (Exception e) {
-            log.error("OpenAI 响应转 Anthropic 转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming OpenAI response to Anthropic: {}", e.getMessage());
             return body;
         }
     }
@@ -642,10 +642,10 @@ public class TransformerServiceImpl implements TransformerService {
 
             return outputBuilder.length() > 0 ? outputBuilder.toString() : null;
         } catch (JsonProcessingException e) {
-            log.error("OpenAI SSE 转 Anthropic 解析失败: {}", e.getMessage());
+            log.error("Failed to parse OpenAI SSE when transforming to Anthropic: {}", e.getMessage());
             return null;
         } catch (Exception e) {
-            log.error("OpenAI SSE 转 Anthropic 转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming OpenAI SSE to Anthropic: {}", e.getMessage());
             return null;
         }
     }
@@ -728,10 +728,10 @@ public class TransformerServiceImpl implements TransformerService {
 
             return openAiResponseNode.toString();
         } catch (JsonProcessingException e) {
-            log.error("Anthropic 响应转 OpenAI 解析失败: {}", e.getMessage());
+            log.error("Failed to parse Anthropic response when transforming to OpenAI: {}", e.getMessage());
             return body;
         } catch (Exception e) {
-            log.error("Anthropic 响应转 OpenAI 转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming Anthropic response to OpenAI: {}", e.getMessage());
             return body;
         }
     }
@@ -847,10 +847,10 @@ public class TransformerServiceImpl implements TransformerService {
             
             return CcrConstants.SSE_DATA_PREFIX + openAiChunk.toString() + "\n\n";
         } catch (JsonProcessingException e) {
-            log.error("Anthropic SSE 转 OpenAI 解析失败: {}", e.getMessage());
+            log.error("Failed to parse Anthropic SSE when transforming to OpenAI: {}", e.getMessage());
             return line;
         } catch (Exception e) {
-            log.error("Anthropic SSE 转 OpenAI 转换发生未知错误: {}", e.getMessage());
+            log.error("Unknown error occurred when transforming Anthropic SSE to OpenAI: {}", e.getMessage());
             return line;
         }
     }
