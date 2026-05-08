@@ -86,4 +86,85 @@ public class TransformerServiceImplTest {
         
         assertEquals("claude-3-opus-20240229", root.get("model").asText());
     }
+
+    @Test
+    void testTransformAnthropicToOpenAi_ThinkingAndArray() throws Exception {
+        String anthropicJson = "{\n" +
+                "  \"model\": \"claude-3\",\n" +
+                "  \"messages\": [\n" +
+                "    {\n" +
+                "      \"role\": \"assistant\",\n" +
+                "      \"content\": [\n" +
+                "        {\"type\": \"thinking\", \"thinking\": \"I am thinking\", \"signature\": \"sig\"},\n" +
+                "        {\"type\": \"text\", \"text\": \"Hello\"}\n" +
+                "      ]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"max_tokens\": 1024\n" +
+                "}";
+
+        String result = transformerService.transformAnthropicToOpenAi(anthropicJson);
+        JsonNode root = objectMapper.readTree(result);
+        JsonNode messages = root.get(CcrConstants.FIELD_MESSAGES);
+        
+        assertEquals(1, messages.size());
+        JsonNode assistantMsg = messages.get(0);
+        assertEquals("assistant", assistantMsg.get("role").asText());
+        assertEquals("I am thinking", assistantMsg.get("reasoning_content").asText());
+        assertEquals("Hello", assistantMsg.get("content").asText());
+    }
+
+    @Test
+    void testTransformAnthropicToOpenAi_ToolCall() throws Exception {
+        String anthropicJson = "{\n" +
+                "  \"model\": \"claude-3\",\n" +
+                "  \"messages\": [\n" +
+                "    {\n" +
+                "      \"role\": \"assistant\",\n" +
+                "      \"content\": [\n" +
+                "        {\"type\": \"text\", \"text\": \"Calling tool\"},\n" +
+                "        {\"type\": \"tool_use\", \"id\": \"tool_1\", \"name\": \"get_weather\", \"input\": {\"city\": \"San Francisco\"}}\n" +
+                "      ]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"max_tokens\": 1024\n" +
+                "}";
+
+        String result = transformerService.transformAnthropicToOpenAi(anthropicJson);
+        JsonNode root = objectMapper.readTree(result);
+        JsonNode messages = root.get(CcrConstants.FIELD_MESSAGES);
+        
+        JsonNode assistantMsg = messages.get(0);
+        assertEquals("assistant", assistantMsg.get("role").asText());
+        assertEquals("Calling tool", assistantMsg.get("content").asText());
+        assertTrue(assistantMsg.has("tool_calls"));
+        assertEquals("get_weather", assistantMsg.get("tool_calls").get(0).get("function").get("name").asText());
+        assertEquals("{\"city\":\"San Francisco\"}", assistantMsg.get("tool_calls").get(0).get("function").get("arguments").asText());
+    }
+
+    @Test
+    void testTransformAnthropicToOpenAi_ToolResult() throws Exception {
+        String anthropicJson = "{\n" +
+                "  \"model\": \"claude-3\",\n" +
+                "  \"messages\": [\n" +
+                "    {\n" +
+                "      \"role\": \"user\",\n" +
+                "      \"content\": [\n" +
+                "        {\"type\": \"tool_result\", \"tool_use_id\": \"tool_1\", \"content\": \"Sunny, 20C\"}\n" +
+                "      ]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"max_tokens\": 1024\n" +
+                "}";
+
+        String result = transformerService.transformAnthropicToOpenAi(anthropicJson);
+        JsonNode root = objectMapper.readTree(result);
+        JsonNode messages = root.get(CcrConstants.FIELD_MESSAGES);
+        
+        assertEquals(1, messages.size());
+        JsonNode toolMsg = messages.get(0);
+        assertEquals("tool", toolMsg.get("role").asText());
+        assertEquals("tool_1", toolMsg.get("tool_call_id").asText());
+        assertEquals("Sunny, 20C", toolMsg.get("content").asText());
+    }
 }

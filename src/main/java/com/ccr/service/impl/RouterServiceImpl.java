@@ -7,6 +7,7 @@ import com.ccr.service.RouterService.RouteResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.slf4j.Logger;
@@ -37,43 +38,43 @@ public class RouterServiceImpl implements RouterService {
      */
     @Override
     public RouteResult getRoute(String requestBody) {
-        String targetModelStr = null;
-        try {
-            JsonNode rootNode = objectMapper.readTree(requestBody);
-            String inputModel = rootNode.has(CcrConstants.FIELD_MODEL) ? rootNode.get(CcrConstants.FIELD_MODEL).asText() : "";
-
-            // 1. 如果请求中模型已经是 "ProviderName,ModelName" 格式，直接解析
-            if (inputModel.contains(",")) {
-                targetModelStr = inputModel;
-            } else {
-                // 2. 自动检测请求场景（长上下文、思考、后台等）
-                String scenario = detectScenario(rootNode, inputModel);
-                log.info("Detected scenario: {}", scenario);
-                // 根据场景从配置中读取对应的模型配置
-                targetModelStr = ccrConfig.getRouterModel(scenario);
-                if (targetModelStr == null) {
-                    targetModelStr = ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
-                }
-            }
-        } catch (JsonProcessingException e) {
-            log.error("Failed to parse request body, using default route: {}", e.getMessage());
-            targetModelStr = ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
-        } catch (Exception e) {
-            log.error("Unknown error occurred during route selection: {}", e.getMessage());
-            targetModelStr = ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
-        }
-
-        // 如果未配置路由，则兜底使用第一个供应商
+        String targetModelStr = resolveTargetModelString(requestBody);
+        
         if (targetModelStr == null) {
             return new RouteResult(ccrConfig.getProviders().get(0), "default-model");
         }
 
-        // 解析 "ProviderName,ModelName" 字符串
+        return parseRouteResult(targetModelStr);
+    }
+
+    private String resolveTargetModelString(String requestBody) {
+        try {
+            JsonNode rootNode = objectMapper.readTree(requestBody);
+            String inputModel = rootNode.path(CcrConstants.FIELD_MODEL).asText("");
+
+            if (inputModel.contains(",")) {
+                return inputModel;
+            }
+
+            String scenario = detectScenario(rootNode, inputModel);
+            log.info("Detected scenario: {}", scenario);
+            
+            String targetModelStr = ccrConfig.getRouterModel(scenario);
+            return (targetModelStr != null) ? targetModelStr : ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
+            
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse request body, using default route: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Unknown error occurred during route selection: {}", e.getMessage());
+        }
+        return ccrConfig.getRouterModel(CcrConstants.SCENARIO_DEFAULT);
+    }
+
+    private RouteResult parseRouteResult(String targetModelStr) {
         String[] parts = targetModelStr.split(",");
         String providerName = parts[0];
         String modelName = parts.length > 1 ? parts[1] : parts[0];
         
-        // 匹配供应商
         CcrConfig.Provider provider = ccrConfig.getProviders().stream()
                 .filter(p -> p.getName().equalsIgnoreCase(providerName))
                 .findFirst()
@@ -86,36 +87,43 @@ public class RouterServiceImpl implements RouterService {
      * 根据请求体特征识别当前的使用场景
      */
     private String detectScenario(JsonNode rootNode, String inputModel) {
-        // 1. 长上下文识别：根据估算的 Token 数决定
-        int tokenCount = calculateTokenCount(rootNode);
-        if (tokenCount > ccrConfig.getLongContextThreshold()) {
+        if (isLongContext(rootNode)) {
             return CcrConstants.SCENARIO_LONG_CONTEXT;
         }
 
-        // 2. 后台任务识别：如果模型名包含 "haiku"，通常是 Claude Code 的后台任务
-        if (inputModel.toLowerCase().contains("haiku")) {
+        if (isBackgroundTask(inputModel)) {
             return CcrConstants.SCENARIO_BACKGROUND;
         }
 
-        // 3. 联网搜索场景识别：检测是否包含 web_search 工具
-        if (rootNode.has(CcrConstants.FIELD_TOOLS)) {
-            JsonNode tools = rootNode.get(CcrConstants.FIELD_TOOLS);
-            if (tools.isArray()) {
-                for (JsonNode tool : tools) {
-                    if (tool.has(CcrConstants.FIELD_TYPE) && tool.get(CcrConstants.FIELD_TYPE).asText().startsWith(CcrConstants.ANT_TOOL_WEB_SEARCH)) {
-                        return CcrConstants.SCENARIO_WEB_SEARCH;
-                    }
-                }
-            }
+        if (isWebSearchTask(rootNode)) {
+            return CcrConstants.SCENARIO_WEB_SEARCH;
         }
 
-        // 4. 深度思考场景识别：检测请求中是否包含 thinking 配置
         if (rootNode.has(CcrConstants.FIELD_THINKING)) {
             return CcrConstants.SCENARIO_THINK;
         }
 
-        // 默认场景
         return CcrConstants.SCENARIO_DEFAULT;
+    }
+
+    private boolean isLongContext(JsonNode rootNode) {
+        return calculateTokenCount(rootNode) > ccrConfig.getLongContextThreshold();
+    }
+
+    private boolean isBackgroundTask(String inputModel) {
+        return inputModel.toLowerCase().contains("haiku");
+    }
+
+    private boolean isWebSearchTask(JsonNode rootNode) {
+        JsonNode tools = rootNode.get(CcrConstants.FIELD_TOOLS);
+        if (tools instanceof ArrayNode) {
+            for (JsonNode tool : tools) {
+                if (tool.path(CcrConstants.FIELD_TYPE).asText().startsWith(CcrConstants.ANT_TOOL_WEB_SEARCH)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
