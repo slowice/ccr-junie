@@ -130,37 +130,42 @@ public class RouterServiceImpl implements RouterService {
      * 简易 Token 计数器（参考原项目逻辑，按 字符数/4 估算）
      */
     private int calculateTokenCount(JsonNode rootNode) {
-        int charCount = 0;
-        // 统计 messages 中的内容长度
-        if (rootNode.has(CcrConstants.FIELD_MESSAGES) && rootNode.get(CcrConstants.FIELD_MESSAGES).isArray()) {
-            for (JsonNode message : rootNode.get(CcrConstants.FIELD_MESSAGES)) {
-                JsonNode content = message.get(CcrConstants.FIELD_CONTENT);
-                if (content != null) {
-                    if (content.isTextual()) {
-                        charCount += content.asText().length();
-                    } else if (content.isArray()) {
-                        for (JsonNode part : content) {
-                            if (part.has(CcrConstants.FIELD_TEXT)) {
-                                charCount += part.get(CcrConstants.FIELD_TEXT).asText().length();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // 统计 system prompt 的长度
-        if (rootNode.has(CcrConstants.FIELD_SYSTEM)) {
-            JsonNode system = rootNode.get(CcrConstants.FIELD_SYSTEM);
-            if (system.isTextual()) {
-                charCount += system.asText().length();
-            } else if (system.isArray()) {
-                for (JsonNode part : system) {
-                    if (part.has(CcrConstants.FIELD_TEXT)) {
-                        charCount += part.get(CcrConstants.FIELD_TEXT).asText().length();
-                    }
-                }
-            }
-        }
+        int charCount = countMessagesChars(rootNode);
+        charCount += countSystemChars(rootNode);
         return charCount / 4;
+    }
+
+    private int countMessagesChars(JsonNode rootNode) {
+        int count = 0;
+        JsonNode messages = rootNode.get(CcrConstants.FIELD_MESSAGES);
+        if (messages != null && messages.isArray()) {
+            for (JsonNode message : messages) {
+                count += countContentChars(message.get(CcrConstants.FIELD_CONTENT));
+            }
+        }
+        return count;
+    }
+
+    private int countSystemChars(JsonNode rootNode) {
+        return countContentChars(rootNode.get(CcrConstants.FIELD_SYSTEM));
+    }
+
+    private int countContentChars(JsonNode content) {
+        if (content == null || content.isNull()) return 0;
+        
+        if (content.isTextual()) {
+            return content.asText().length();
+        }
+        
+        if (content.isArray()) {
+            int count = 0;
+            for (JsonNode part : content) {
+                if (part.has(CcrConstants.FIELD_TEXT)) {
+                    count += part.get(CcrConstants.FIELD_TEXT).asText().length();
+                }
+            }
+            return count;
+        }
+        return 0;
     }
 }

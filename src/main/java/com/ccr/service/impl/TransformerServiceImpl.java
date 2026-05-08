@@ -68,6 +68,10 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 设置流式开关和最大 Token 数
+     * Anthropic 协议中 max_tokens 是必填项，如果 OpenAI 请求中没有提供，则设置默认值
+     */
     private void setStreamAndMaxTokens(ObjectNode openAiRequest, ObjectNode anthropicRequest) {
         if (openAiRequest.has(CcrConstants.FIELD_STREAM)) {
             anthropicRequest.set(CcrConstants.FIELD_STREAM, openAiRequest.get(CcrConstants.FIELD_STREAM));
@@ -83,6 +87,9 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 处理 OpenAI 消息数组，提取 System Prompt 并将其余消息转为 Anthropic 格式
+     */
     private void processOpenAiMessages(ArrayNode openAiMessages, ArrayNode anthropicMessages, StringBuilder systemPrompt) {
         for (JsonNode msg : openAiMessages) {
             if (!msg.has(CcrConstants.FIELD_ROLE)) continue;
@@ -98,6 +105,10 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 转换单条 OpenAI 消息到 Anthropic 格式
+     * 特别处理 content 为数组的情况，确保每一项都符合 Anthropic 的内容块规范
+     */
     private JsonNode transformOpenAiMessage(JsonNode msg, JsonNode content) {
         JsonNode msgCopy = msg.deepCopy();
         if (!(msgCopy instanceof ObjectNode)) return msg;
@@ -153,6 +164,9 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 设置 OpenAI 请求的基础字段
+     */
     private void setOpenAiBasicFields(ObjectNode anthropicRequestNode, ObjectNode openAiRequest) {
         openAiRequest.set(CcrConstants.FIELD_MODEL, anthropicRequestNode.get(CcrConstants.FIELD_MODEL));
         
@@ -169,73 +183,72 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 处理 Anthropic 的 System Prompt，转为 OpenAI 的 system 角色消息
+     */
     private void processAnthropicSystem(ObjectNode anthropicRequestNode, ArrayNode openAiMessagesArray) {
-        if (anthropicRequestNode.has(CcrConstants.FIELD_SYSTEM)) {
-            JsonNode system = anthropicRequestNode.get(CcrConstants.FIELD_SYSTEM);
-            ObjectNode sysMsg = objectMapper.createObjectNode();
-            sysMsg.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_SYSTEM);
-            
-            if (system.isTextual()) {
-                sysMsg.set(CcrConstants.FIELD_CONTENT, system);
-            } else if (system.isArray()) {
-                StringBuilder stringBuilder = new StringBuilder();
-                for (JsonNode node : system) {
-                    if (node.has(CcrConstants.FIELD_TEXT)) {
-                        stringBuilder.append(node.get(CcrConstants.FIELD_TEXT).asText());
-                    }
-                }
-                sysMsg.put(CcrConstants.FIELD_CONTENT, stringBuilder.toString());
-            } else {
-                sysMsg.set(CcrConstants.FIELD_CONTENT, system);
-            }
-            openAiMessagesArray.add(sysMsg);
+        JsonNode system = anthropicRequestNode.get(CcrConstants.FIELD_SYSTEM);
+        if (system == null || system.isNull()) return;
+
+        ObjectNode sysMsg = objectMapper.createObjectNode();
+        sysMsg.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_SYSTEM);
+        
+        if (system.isArray()) {
+            sysMsg.put(CcrConstants.FIELD_CONTENT, extractTextFromArray(system));
+        } else {
+            sysMsg.set(CcrConstants.FIELD_CONTENT, system);
         }
+        openAiMessagesArray.add(sysMsg);
     }
 
+    /**
+     * 从 Anthropic 的内容数组中提取纯文本
+     */
+    private String extractTextFromArray(JsonNode arrayNode) {
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode node : arrayNode) {
+            if (node.has(CcrConstants.FIELD_TEXT)) {
+                sb.append(node.get(CcrConstants.FIELD_TEXT).asText());
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 遍历并处理 Anthropic 的消息列表
+     */
     private void processAnthropicMessages(ObjectNode anthropicRequestNode, ArrayNode openAiMessagesArray) {
         JsonNode messagesNode = anthropicRequestNode.get(CcrConstants.FIELD_MESSAGES);
         if (!(messagesNode instanceof ArrayNode)) return;
         
-        ArrayNode anthropicMessages = (ArrayNode) messagesNode;
-        for (JsonNode msg : anthropicMessages) {
-            if (msg.isObject()) {
-                ObjectNode msgObj = (ObjectNode) msg;
-                JsonNode content = msgObj.get(CcrConstants.FIELD_CONTENT);
-                
-                if (content instanceof ArrayNode) {
-                    if (handleAnthropicContentArray((ArrayNode) content, openAiMessagesArray, msgObj)) {
-                        continue;
-                    }
-                }
-            }
-            openAiMessagesArray.add(msg.deepCopy());
+        for (JsonNode msg : (ArrayNode) messagesNode) {
+            processSingleAnthropicMessage(msg, openAiMessagesArray);
         }
     }
 
+    /**
+     * 处理单条 Anthropic 消息，根据角色和内容类型进行分发转换
+     */
+    private void processSingleAnthropicMessage(JsonNode msg, ArrayNode openAiMessagesArray) {
+        if (msg.isObject()) {
+            ObjectNode msgObj = (ObjectNode) msg;
+            JsonNode content = msgObj.get(CcrConstants.FIELD_CONTENT);
+            // 如果 content 是数组，需要根据角色进行复杂的结构重组
+            if (content instanceof ArrayNode && handleAnthropicContentArray((ArrayNode) content, openAiMessagesArray, msgObj)) {
+                return;
+            }
+        }
+        openAiMessagesArray.add(msg.deepCopy());
+    }
+
+    /**
+     * 处理 Anthropic 的内容数组（可能包含 text, thinking, tool_use, tool_result）
+     */
     private boolean handleAnthropicContentArray(ArrayNode contentArray, ArrayNode openAiMessagesArray, ObjectNode msgObj) {
         String role = msgObj.path(CcrConstants.FIELD_ROLE).asText();
         
         if (CcrConstants.ROLE_USER.equals(role)) {
-            StringBuilder textContent = new StringBuilder();
-            boolean hasSpecialType = false;
-            for (JsonNode item : contentArray) {
-                String type = item.path(CcrConstants.FIELD_TYPE).asText();
-                if ("tool_result".equals(type)) {
-                    hasSpecialType = true;
-                    if (textContent.length() > 0) {
-                        addUserTextMessage(textContent.toString(), openAiMessagesArray);
-                        textContent.setLength(0);
-                    }
-                    addToolResultMessage(item, openAiMessagesArray);
-                } else if (CcrConstants.FIELD_TEXT.equals(type)) {
-                    textContent.append(item.path(CcrConstants.FIELD_TEXT).asText());
-                }
-            }
-            if (textContent.length() > 0) {
-                addUserTextMessage(textContent.toString(), openAiMessagesArray);
-                hasSpecialType = true;
-            }
-            return hasSpecialType;
+            return handleUserContentArray(contentArray, openAiMessagesArray);
         }
         
         if (CcrConstants.ROLE_ASSISTANT.equals(role)) {
@@ -245,6 +258,42 @@ public class TransformerServiceImpl implements TransformerService {
         return false;
     }
 
+    /**
+     * 处理 User 角色的内容数组，主要映射 tool_result 到 OpenAI 的 tool 角色
+     */
+    private boolean handleUserContentArray(ArrayNode contentArray, ArrayNode openAiMessagesArray) {
+        StringBuilder textContent = new StringBuilder();
+        boolean hasSpecialType = false;
+        for (JsonNode item : contentArray) {
+            String type = item.path(CcrConstants.FIELD_TYPE).asText();
+            if ("tool_result".equals(type)) {
+                hasSpecialType = true;
+                flushUserTextMessage(textContent, openAiMessagesArray);
+                addToolResultMessage(item, openAiMessagesArray);
+            } else if (CcrConstants.FIELD_TEXT.equals(type)) {
+                textContent.append(item.path(CcrConstants.FIELD_TEXT).asText());
+            }
+        }
+        if (textContent.length() > 0) {
+            addUserTextMessage(textContent.toString(), openAiMessagesArray);
+            hasSpecialType = true;
+        }
+        return hasSpecialType;
+    }
+
+    /**
+     * 将暂存的 User 文本内容刷新到消息数组中
+     */
+    private void flushUserTextMessage(StringBuilder textContent, ArrayNode openAiMessagesArray) {
+        if (textContent.length() > 0) {
+            addUserTextMessage(textContent.toString(), openAiMessagesArray);
+            textContent.setLength(0);
+        }
+    }
+
+    /**
+     * 添加一条 User 角色文本消息
+     */
     private void addUserTextMessage(String text, ArrayNode openAiMessagesArray) {
         ObjectNode userMsg = objectMapper.createObjectNode();
         userMsg.put(CcrConstants.FIELD_ROLE, CcrConstants.ROLE_USER);
@@ -252,6 +301,9 @@ public class TransformerServiceImpl implements TransformerService {
         openAiMessagesArray.add(userMsg);
     }
 
+    /**
+     * 将 Anthropic 的 tool_result 转换为 OpenAI 的 tool 角色消息
+     */
     private void addToolResultMessage(JsonNode item, ArrayNode openAiMessagesArray) {
         ObjectNode toolMsg = objectMapper.createObjectNode();
         toolMsg.put(CcrConstants.FIELD_ROLE, "tool");
@@ -268,6 +320,9 @@ public class TransformerServiceImpl implements TransformerService {
         openAiMessagesArray.add(toolMsg);
     }
 
+    /**
+     * 处理 Assistant 角色的内容数组，映射 thinking 到 reasoning_content，tool_use 到 tool_calls
+     */
     private boolean handleAssistantToolUse(ArrayNode contentArray, ArrayNode openAiMessagesArray) {
         ArrayNode toolCalls = objectMapper.createArrayNode();
         boolean hasToolUse = false;
@@ -314,6 +369,9 @@ public class TransformerServiceImpl implements TransformerService {
         return false;
     }
 
+    /**
+     * 构建 OpenAI 格式的工具调用对象
+     */
     private ObjectNode buildOpenAiToolCall(JsonNode item) {
         ObjectNode toolCall = objectMapper.createObjectNode();
         toolCall.put(CcrConstants.FIELD_TYPE, "function");
@@ -325,6 +383,9 @@ public class TransformerServiceImpl implements TransformerService {
         return toolCall;
     }
 
+    /**
+     * 处理 Anthropic 的 tools 定义转换为 OpenAI 格式
+     */
     private void processAnthropicTools(ObjectNode anthropicRequestNode, ObjectNode openAiRequest) {
         JsonNode toolsNode = anthropicRequestNode.get(CcrConstants.FIELD_TOOLS);
         if (toolsNode instanceof ArrayNode) {
@@ -344,6 +405,9 @@ public class TransformerServiceImpl implements TransformerService {
         }
     }
 
+    /**
+     * 处理 Anthropic 的 tool_choice 转换为 OpenAI 格式
+     */
     private void processAnthropicToolChoice(ObjectNode anthropicRequestNode, ObjectNode openAiRequest) {
         if (anthropicRequestNode.has("tool_choice")) {
             JsonNode anthropicToolChoice = anthropicRequestNode.get("tool_choice");
@@ -429,30 +493,41 @@ public class TransformerServiceImpl implements TransformerService {
     }
 
     private void addTextOrArrayContent(JsonNode message, ArrayNode contentArray) {
-        if (message.has(CcrConstants.FIELD_CONTENT) && !message.get(CcrConstants.FIELD_CONTENT).isNull()) {
-            JsonNode contentNode = message.get(CcrConstants.FIELD_CONTENT);
-            if (contentNode.isTextual()) {
-                String text = contentNode.asText();
-                if (!text.isEmpty()) {
-                    ObjectNode contentObj = objectMapper.createObjectNode();
-                    contentObj.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_TEXT);
-                    contentObj.put(CcrConstants.FIELD_TEXT, text);
-                    contentArray.add(contentObj);
-                }
-            } else if (contentNode.isArray()) {
-                for (JsonNode item : contentNode) {
-                    if (item.isObject()) {
-                        ObjectNode itemObj = item.deepCopy();
-                        if (CcrConstants.FIELD_THINKING.equals(itemObj.path(CcrConstants.FIELD_TYPE).asText()) 
-                                && !itemObj.has("signature")) {
-                            itemObj.put("signature", "sign_" + UUID.randomUUID().toString().substring(0, 8));
-                        }
-                        contentArray.add(itemObj);
-                    } else {
-                        contentArray.add(item);
-                    }
-                }
+        JsonNode contentNode = message.get(CcrConstants.FIELD_CONTENT);
+        if (contentNode == null || contentNode.isNull()) return;
+
+        if (contentNode.isTextual()) {
+            addTextContent(contentNode.asText(), contentArray);
+        } else if (contentNode.isArray()) {
+            addArrayContent((ArrayNode) contentNode, contentArray);
+        }
+    }
+
+    private void addTextContent(String text, ArrayNode contentArray) {
+        if (text != null && !text.isEmpty()) {
+            ObjectNode contentObj = objectMapper.createObjectNode();
+            contentObj.put(CcrConstants.FIELD_TYPE, CcrConstants.FIELD_TEXT);
+            contentObj.put(CcrConstants.FIELD_TEXT, text);
+            contentArray.add(contentObj);
+        }
+    }
+
+    private void addArrayContent(ArrayNode contentNode, ArrayNode contentArray) {
+        for (JsonNode item : contentNode) {
+            if (item.isObject()) {
+                ObjectNode itemObj = item.deepCopy();
+                ensureThinkingSignature(itemObj);
+                contentArray.add(itemObj);
+            } else {
+                contentArray.add(item);
             }
+        }
+    }
+
+    private void ensureThinkingSignature(ObjectNode itemObj) {
+        if (CcrConstants.FIELD_THINKING.equals(itemObj.path(CcrConstants.FIELD_TYPE).asText()) 
+                && !itemObj.has("signature")) {
+            itemObj.put("signature", "sign_" + UUID.randomUUID().toString().substring(0, 8));
         }
     }
 
