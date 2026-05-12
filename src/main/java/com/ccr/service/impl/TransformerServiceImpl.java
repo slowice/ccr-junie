@@ -559,9 +559,9 @@ public class TransformerServiceImpl implements TransformerService {
             int completionTokens = openAiUsage.has(CcrConstants.FIELD_COMPLETION_TOKENS) ? openAiUsage.get(CcrConstants.FIELD_COMPLETION_TOKENS).asInt() : 0;
             
             int cached = 0;
-            if (openAiUsage.path("prompt_tokens_details").has("cached_tokens")) {
+        if (openAiUsage.path("prompt_tokens_details").has("cached_tokens")) {
                 cached = openAiUsage.get("prompt_tokens_details").get("cached_tokens").asInt();
-                usage.put("cache_read_input_tokens", cached);
+                usage.put(CcrConstants.FIELD_CACHE_READ_INPUT_TOKENS, cached);
             }
             
             usage.put(CcrConstants.FIELD_INPUT_TOKENS, Math.max(0, promptTokens - cached));
@@ -914,7 +914,8 @@ public class TransformerServiceImpl implements TransformerService {
         }
         
         choice.set(CcrConstants.FIELD_MESSAGE, message);
-        choice.put(CcrConstants.OPENAI_FINISH_REASON, CcrConstants.OPENAI_FINISH_REASON_STOP);
+        String antStopReason = rootNode.has(CcrConstants.FIELD_STOP_REASON) ? rootNode.get(CcrConstants.FIELD_STOP_REASON).asText() : null;
+        choice.put(CcrConstants.OPENAI_FINISH_REASON, mapAnthropicStopReasonToOpenAi(antStopReason));
         choices.add(choice);
         openAiResponseNode.set(CcrConstants.FIELD_CHOICES, choices);
     }
@@ -925,7 +926,12 @@ public class TransformerServiceImpl implements TransformerService {
         toolCall.put(CcrConstants.FIELD_TYPE, "function");
         ObjectNode function = objectMapper.createObjectNode();
         function.put("name", block.path("name").asText(""));
-        function.set("arguments", block.get("input"));
+        JsonNode input = block.get("input");
+        if (input != null) {
+            function.put("arguments", input.isTextual() ? input.asText() : input.toString());
+        } else {
+            function.put("arguments", "{}");
+        }
         toolCall.set("function", function);
         return toolCall;
     }
